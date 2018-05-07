@@ -26,8 +26,8 @@ type Walker interface {
 	Float(value float64, sixtyFourBit bool)
 	UnsupportedTypeEncoder(Type reflect.Type)
 
-	YouDealValue(value reflect.Value) bool
-	YouDealType(typ reflect.Type) bool
+	InspectValue(value reflect.Value) bool
+	InspectType(typ reflect.Type) bool
 
 	ArrayStart()
 	ArrayElem()
@@ -57,7 +57,7 @@ func reflectValue(v reflect.Value, walker Walker) {
 }
 
 func walk(v reflect.Value, walker Walker) {
-	if walker.YouDealValue(v) {
+	if !walker.InspectValue(v) {
 		return
 	}
 	basic(v, walker)
@@ -109,7 +109,7 @@ func sliceEncoder(v reflect.Value, walker Walker) {
 	if deref.Kind() == reflect.Uint8 {
 		p := reflect.PtrTo(deref)
 		// check if []int8 has it's own marshal implementation
-		if !walker.YouDealType(p) {
+		if walker.InspectType(p) {
 			if v.IsNil() {
 				walker.NullValue()
 				return

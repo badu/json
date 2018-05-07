@@ -382,28 +382,28 @@ func (e *encodeState) UnsupportedTypeEncoder(Type reflect.Type) {
 	e.error(&UnsupportedTypeError{Type})
 }
 
-func (e *encodeState) YouDealType(typ reflect.Type) bool {
+func (e *encodeState) InspectType(typ reflect.Type) bool {
 	if typ.Implements(marshalerType) {
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
-func (e *encodeState) YouDealValue(value reflect.Value) bool {
+func (e *encodeState) InspectValue(value reflect.Value) bool {
 	if value.Type().Implements(marshalerType) {
 		e.marshalerEncoder(value)
-		return true
+		return false
 	}
 	if value.Type().Kind() != reflect.Ptr {
 		if reflect.PtrTo(value.Type()).Implements(marshalerType) {
 			if value.CanAddr() {
 				e.addrMarshalerEncoder(value)
-				return true
+				return false
 			}
 
 		}
 	}
-	return false
+	return true
 }
 
 func (e *encodeState) ByteSlice(value []byte) {
