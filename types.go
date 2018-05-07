@@ -224,13 +224,16 @@ type (
 		escapeHTML bool
 	}
 
+	qualFn func(srcKey, destKey []byte) bool
+
 	// A field represents a single field found in a struct.
 	field struct {
 		name      string
 		nameBytes []byte // []byte(name)
 		indexes   []int
 		Type      reflect.Type
-		equalFold func(srcKey, destKey []byte) bool // bytes.EqualFold or equivalent
+		// TODO : extract equalFold from here and make a sync.Map (@see getFieldNamed of decode_state)
+		equalFold qualFn // bytes.EqualFold or equivalent
 		tag       bool
 		willOmit  bool
 		isBasic   bool

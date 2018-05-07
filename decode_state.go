@@ -418,6 +418,7 @@ func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *fiel
 			result = field
 			break
 		}
+		// TODO : equal fold should be searched in a sync.Map by the fieldName -> map[ []byte ] func(srcKey, destKey []byte) bool
 		if result == nil && field.equalFold(field.nameBytes, fieldName) {
 			result = field
 		}

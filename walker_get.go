@@ -7,8 +7,6 @@
 package json
 
 import (
-	"fmt"
-	"os"
 	"reflect"
 )
 
@@ -152,9 +150,11 @@ func structEncoder(v reflect.Value, walker Walker) {
 		valueType := v.Type()
 
 		fieldValue := v
+		/**
 		if len(field.indexes) > 1 {
 			fmt.Fprintf(os.Stderr, "%#v indexes\n", field.indexes)
 		}
+		**/
 		for _, idx := range field.indexes {
 			if valueType.Kind() == reflect.Ptr {
 				valueType = valueType.Elem()

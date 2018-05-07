@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -338,9 +337,11 @@ func typeFields(value reflect.Value) []field {
 					if len(name) == 0 {
 						name = structField.Name
 					}
+					/**
 					if len(indexes) > 1 {
 						println("Yes, " + name + " has " + strconv.Itoa(len(indexes)) + " indexes.")
 					}
+					**/
 					result = append(result, fillField(field{
 						name:     name,
 						tag:      tagged,
