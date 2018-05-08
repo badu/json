@@ -175,6 +175,17 @@ func Marshal(v interface{}) ([]byte, error) {
 	return e.Bytes(), nil
 }
 
+// Same as Marshal, but sets the flag to sort map keys while serializing
+func MarshalWithSortMap(v interface{}) ([]byte, error) {
+	e := &encodeState{}
+	e.opts = encOpts{escapeHTML: true, willSortMapKeys: true}
+	err := e.marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return e.Bytes(), nil
+}
+
 // MarshalIndent is like Marshal but applies Indent to format the output.
 // Each JSON element in the output will begin on a new line beginning with prefix followed by one or more copies of indent according to the indentation nesting.
 func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error) {
@@ -312,4 +323,9 @@ func NewDecoder(r io.Reader) *Decoder {
 // NewEncoder returns a new encoder that writes to w.
 func NewEncoder(w io.Writer) *Encoder {
 	return &Encoder{w: w, escapeHTML: true}
+}
+
+// NewEncoder returns a new encoder that writes to w and sorts out map keys while serializing
+func NewSortedMapsEncoder(w io.Writer) *Encoder {
+	return &Encoder{w: w, escapeHTML: true, sortMapKeys: true}
 }

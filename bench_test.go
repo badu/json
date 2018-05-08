@@ -278,7 +278,7 @@ func BenchmarkNumberIsValidRegexp(b *testing.B) {
 }
 
 func BenchmarkSkipValue(b *testing.B) {
-	initBig()
+	initBig(false)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		benchScan.nextValue(jsonBig)

@@ -16,20 +16,6 @@ import (
 	"unicode/utf8"
 )
 
-func resolve(w *KeyValuePair) error {
-	switch w.value.Kind() {
-	case reflect.String:
-		w.keyName = w.value.String()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		w.keyName = FormatInt(w.value.Int())
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		w.keyName = FormatUint(w.value.Uint())
-	default:
-		panic("unexpected map key type")
-	}
-	return nil
-}
-
 // NOTE: keep in sync with stringBytes below.
 func (e *encodeState) string(name string, escapeHTML bool) {
 	e.WriteByte(quote)
@@ -435,10 +421,10 @@ func (e *encodeState) ArrayEnd() {
 }
 
 // marshalerFieldCache is like typeFields but uses a cache to avoid repeated work.
-func (e *encodeState) StructStart(value reflect.Value) []field {
+func (e *encodeState) StructStart(value reflect.Value) []MarshalField {
 	e.WriteByte(curlOpen)
 
-	cachedFields, _ := marshalerFieldCache.value.Load().(map[reflect.Type][]field)
+	cachedFields, _ := marshalerFieldCache.value.Load().(map[reflect.Type][]MarshalField)
 	fields := cachedFields[value.Type()]
 	if fields != nil {
 		return fields
@@ -446,16 +432,15 @@ func (e *encodeState) StructStart(value reflect.Value) []field {
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
-	// TODO : better `fields, ok := typeFields(v)` - so we don't Store(empty-map) if not ok
-	fields = typeFields(value)
+	fields = marshalFields(value)
 	if fields == nil {
-		fields = []field{}
+		return []MarshalField{}
 	}
 
 	marshalerFieldCache.mu.Lock()
-	cachedFields, _ = marshalerFieldCache.value.Load().(map[reflect.Type][]field)
+	cachedFields, _ = marshalerFieldCache.value.Load().(map[reflect.Type][]MarshalField)
 
-	newFieldsMap := make(map[reflect.Type][]field, len(cachedFields)+1)
+	newFieldsMap := make(map[reflect.Type][]MarshalField, len(cachedFields)+1)
 
 	for typeKey, fieldsValues := range cachedFields {
 		newFieldsMap[typeKey] = fieldsValues
@@ -472,32 +457,39 @@ func (e *encodeState) StructEnd() {
 	e.WriteByte(curlClose)
 }
 
-func (e *encodeState) NextStructField() {
-	e.WriteByte(comma)
-}
-
-func (e *encodeState) StructField(whichField field) {
-	e.string(whichField.name, e.opts.escapeHTML)
+func (e *encodeState) StructField(currentField MarshalField, isFirst bool) {
+	if !isFirst {
+		e.WriteByte(comma)
+	}
+	e.string(currentField.name, e.opts.escapeHTML)
 	e.WriteByte(colon)
-	e.opts.quoted = whichField.isBasic
+	e.opts.quoted = currentField.isBasic
 }
 
 func (e *encodeState) MapStart(keys []reflect.Value) ([]KeyValuePair, bool) {
 	e.WriteByte(curlOpen)
 
-	result := make([]KeyValuePair, len(keys))
+	// new feature : optional sorting for map keys (default false)
+	if e.opts.willSortMapKeys {
+		//TODO : make `template` with the code sequnce below
+		result := make([]KeyValuePair, len(keys))
 
-	for idx, key := range keys {
-		result[idx].value = key
-		if err := resolve(&result[idx]); err != nil {
-			//error(&MarshalerError{key.Type(), err})
-			panic("Error : " + err.Error() + " on " + key.Type().String())
+		for idx, key := range keys {
+			result[idx].value = key
+			if err := result[idx].resolve(); err != nil {
+				//error(&MarshalerError{key.Type(), err})
+				panic("Error : " + err.Error() + " on " + key.Type().String())
+			}
 		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].keyName < result[j].keyName
+		})
+
+		// end `template`
+		return result, true
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].keyName < result[j].keyName
-	})
-	return result, true
+
+	return []KeyValuePair{}, false
 }
 
 func (e *encodeState) MapEnd() {

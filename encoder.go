@@ -18,7 +18,7 @@ func (enc *Encoder) Encode(v interface{}) error {
 		return enc.err
 	}
 	e := newEncodeState()
-	e.opts = encOpts{escapeHTML: enc.escapeHTML}
+	e.opts = encOpts{escapeHTML: enc.escapeHTML, willSortMapKeys: enc.sortMapKeys}
 	err := e.marshal(v)
 	if err != nil {
 		return err

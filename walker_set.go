@@ -96,6 +96,7 @@ func (w *SetWalker) setBool(boolValue bool) error {
 	}
 	return nil
 }
+
 func (w *SetWalker) isIfaceWNoMeths() bool {
 	if w.Value.Kind() == reflect.Interface && w.Value.NumMethod() == 0 {
 		return true

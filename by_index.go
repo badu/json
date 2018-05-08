@@ -21,3 +21,19 @@ func (x byIndex) Less(i, j int) bool {
 	}
 	return len(x[i].indexes) < len(x[j].indexes)
 }
+
+func (x marshalByIndex) Len() int { return len(x) }
+
+func (x marshalByIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
+
+func (x marshalByIndex) Less(i, j int) bool {
+	for k, xik := range x[i].indexes {
+		if k >= len(x[j].indexes) {
+			return false
+		}
+		if xik != x[j].indexes[k] {
+			return xik < x[j].indexes[k]
+		}
+	}
+	return len(x[i].indexes) < len(x[j].indexes)
+}

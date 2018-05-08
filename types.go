@@ -218,14 +218,23 @@ type (
 	}
 
 	encOpts struct {
-		// isBasic causes primitive fields to be encoded inside JSON strings.
-		quoted bool
-		// escapeHTML causes '<', '>', and '&' to be escaped in JSON strings.
-		escapeHTML bool
+		quoted          bool // isBasic causes primitive fields to be encoded inside JSON strings.
+		escapeHTML      bool // escapeHTML causes '<', '>', and '&' to be escaped in JSON strings.
+		willSortMapKeys bool // map keys sorting. Default false
 	}
 
-	qualFn func(srcKey, destKey []byte) bool
+	// A field represents a single field found in a struct.
+	MarshalField struct {
+		name     string
+		indexes  []int
+		Type     reflect.Type
+		tag      bool
+		willOmit bool
+		isBasic  bool
+	}
+	marshalByIndex []MarshalField // byIndex sorts field by index sequence.
 
+	qualFn func(srcKey, destKey []byte) bool
 	// A field represents a single field found in a struct.
 	field struct {
 		name      string
@@ -288,6 +297,7 @@ type (
 		w            io.Writer
 		err          error
 		escapeHTML   bool
+		sortMapKeys  bool
 		indentBuf    *bytes.Buffer
 		indentPrefix string
 		indentValue  string
@@ -319,9 +329,10 @@ type (
 
 var (
 	marshalerFieldCache struct {
-		value atomic.Value // map[reflect.Type][]field
+		value atomic.Value // map[reflect.Type][]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
+
 	unmarshalerFieldCache struct {
 		value atomic.Value // map[reflect.Type][]field
 		mu    sync.Mutex   // used only by writers

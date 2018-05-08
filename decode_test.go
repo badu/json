@@ -28,26 +28,176 @@ import (
 	"unicode/utf8"
 )
 
-type T struct {
-	X string
-	Y int
-	Z int `json:"-"`
-}
+type (
+	T struct {
+		X string
+		Y int
+		Z int `json:"-"`
+	}
 
-type U struct {
-	Alphabet string `json:"alpha"`
-}
+	U struct {
+		Alphabet string `json:"alpha"`
+	}
 
-type V struct {
-	F1 interface{}
-	F2 int32
-	F3 Number
-	F4 *VOuter
-}
+	V struct {
+		F1 interface{}
+		F2 int32
+		F3 Number
+		F4 *VOuter
+	}
 
-type VOuter struct {
-	V V
-}
+	VOuter struct {
+		V V
+	}
+
+	tx struct {
+		x int
+	}
+
+	u8 uint8
+
+	// A that can unmarshal itself.
+
+	unmarshaler struct {
+		T bool
+	}
+
+	ustruct struct {
+		M unmarshaler
+	}
+
+	// Test data structures for anonymous fields.
+
+	Point struct {
+		Z int
+	}
+
+	Top struct {
+		Level0 int
+		Embed0
+		*Embed0a
+		*Embed0b `json:"e,omitempty"` // treated as named
+		Embed0c  `json:"-"`           // ignored
+		Loop
+		Embed0p // has Point with X, Y, used
+		Embed0q // has Point with Z, used
+		embed   // contains exported field
+	}
+
+	Embed0 struct {
+		Level1a int // overridden by Embed0a's Level1a with json tag
+		Level1b int // used because Embed0a's Level1b is renamed
+		Level1c int // used because Embed0a's Level1c is ignored
+		Level1d int // annihilated by Embed0a's Level1d
+		Level1e int `json:"x"` // annihilated by Embed0a.Level1e
+	}
+
+	Embed0a struct {
+		Level1a int `json:"Level1a,omitempty"`
+		Level1b int `json:"LEVEL1B,omitempty"`
+		Level1c int `json:"-"`
+		Level1d int // annihilated by Embed0's Level1d
+		Level1f int `json:"x"` // annihilated by Embed0's Level1e
+	}
+
+	Embed0b Embed0
+
+	Embed0c Embed0
+
+	Embed0p struct {
+		image.Point
+	}
+
+	Embed0q struct {
+		Point
+	}
+
+	embed struct {
+		Q int
+	}
+
+	Loop struct {
+		Loop1 int `json:",omitempty"`
+		Loop2 int `json:",omitempty"`
+		*Loop
+	}
+
+	// From reflect test:
+	// The X in S6 and S7 annihilate, but they also block the X in S8.S9.
+	S5 struct {
+		S6
+		S7
+		S8
+	}
+
+	S6 struct {
+		X int
+	}
+
+	S7 S6
+
+	S8 struct {
+		S9
+	}
+
+	S9 struct {
+		X int
+		Y int
+	}
+
+	// From reflect test:
+	// The X in S11.S6 and S12.S6 annihilate, but they also block the X in S13.S8.S9.
+	S10 struct {
+		S11
+		S12
+		S13
+	}
+
+	S11 struct {
+		S6
+	}
+
+	S12 struct {
+		S6
+	}
+
+	S13 struct {
+		S8
+	}
+
+	Ambig struct {
+		// Given "hello", the first match should win.
+		First  int `json:"HELLO"`
+		Second int `json:"Hello"`
+	}
+
+	XYZ struct {
+		X interface{}
+		Y interface{}
+		Z interface{}
+	}
+
+	byteWithPtrMarshalJSON byte
+	byteWithMarshalJSON    byte
+
+	intWithMarshalJSON int
+
+	intWithPtrMarshalJSON int
+
+	unmarshalTest struct {
+		in                    string
+		ptr                   interface{}
+		out                   interface{}
+		err                   error
+		useNumber             bool
+		golden                bool
+		disallowUnknownFields bool
+	}
+
+	B struct {
+		B bool `json:",string"`
+	}
+)
 
 // ifaceNumAsFloat64/ifaceNumAsNumber are used to test unmarshaling with and
 // without UseNumber
@@ -65,25 +215,9 @@ var ifaceNumAsNumber = map[string]interface{}{
 	"k4": map[string]interface{}{"kk1": "s", "kk2": Number("2")},
 }
 
-type tx struct {
-	x int
-}
-
-type u8 uint8
-
-// A type that can unmarshal itself.
-
-type unmarshaler struct {
-	T bool
-}
-
 func (u *unmarshaler) UnmarshalJSON(b []byte) error {
 	*u = unmarshaler{true} // All we need to see that UnmarshalJSON is called.
 	return nil
-}
-
-type ustruct struct {
-	M unmarshaler
 }
 
 var (
@@ -95,121 +229,8 @@ var (
 	umstruct = ustruct{unmarshaler{true}}
 )
 
-// Test data structures for anonymous fields.
-
-type Point struct {
-	Z int
-}
-
-type Top struct {
-	Level0 int
-	Embed0
-	*Embed0a
-	*Embed0b `json:"e,omitempty"` // treated as named
-	Embed0c  `json:"-"`           // ignored
-	Loop
-	Embed0p // has Point with X, Y, used
-	Embed0q // has Point with Z, used
-	embed   // contains exported field
-}
-
-type Embed0 struct {
-	Level1a int // overridden by Embed0a's Level1a with json tag
-	Level1b int // used because Embed0a's Level1b is renamed
-	Level1c int // used because Embed0a's Level1c is ignored
-	Level1d int // annihilated by Embed0a's Level1d
-	Level1e int `json:"x"` // annihilated by Embed0a.Level1e
-}
-
-type Embed0a struct {
-	Level1a int `json:"Level1a,omitempty"`
-	Level1b int `json:"LEVEL1B,omitempty"`
-	Level1c int `json:"-"`
-	Level1d int // annihilated by Embed0's Level1d
-	Level1f int `json:"x"` // annihilated by Embed0's Level1e
-}
-
-type Embed0b Embed0
-
-type Embed0c Embed0
-
-type Embed0p struct {
-	image.Point
-}
-
-type Embed0q struct {
-	Point
-}
-
-type embed struct {
-	Q int
-}
-
-type Loop struct {
-	Loop1 int `json:",omitempty"`
-	Loop2 int `json:",omitempty"`
-	*Loop
-}
-
-// From reflect test:
-// The X in S6 and S7 annihilate, but they also block the X in S8.S9.
-type S5 struct {
-	S6
-	S7
-	S8
-}
-
-type S6 struct {
-	X int
-}
-
-type S7 S6
-
-type S8 struct {
-	S9
-}
-
-type S9 struct {
-	X int
-	Y int
-}
-
-// From reflect test:
-// The X in S11.S6 and S12.S6 annihilate, but they also block the X in S13.S8.S9.
-type S10 struct {
-	S11
-	S12
-	S13
-}
-
-type S11 struct {
-	S6
-}
-
-type S12 struct {
-	S6
-}
-
-type S13 struct {
-	S8
-}
-
-type Ambig struct {
-	// Given "hello", the first match should win.
-	First  int `json:"HELLO"`
-	Second int `json:"Hello"`
-}
-
-type XYZ struct {
-	X interface{}
-	Y interface{}
-	Z interface{}
-}
-
 func sliceAddr(x []int) *[]int                 { return &x }
 func mapAddr(x map[string]int) *map[string]int { return &x }
-
-type byteWithMarshalJSON byte
 
 func (b byteWithMarshalJSON) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf(`"Z%.2x"`, byte(b))), nil
@@ -227,8 +248,6 @@ func (b *byteWithMarshalJSON) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type byteWithPtrMarshalJSON byte
-
 func (b *byteWithPtrMarshalJSON) MarshalJSON() ([]byte, error) {
 	return byteWithMarshalJSON(*b).MarshalJSON()
 }
@@ -236,8 +255,6 @@ func (b *byteWithPtrMarshalJSON) MarshalJSON() ([]byte, error) {
 func (b *byteWithPtrMarshalJSON) UnmarshalJSON(data []byte) error {
 	return (*byteWithMarshalJSON)(b).UnmarshalJSON(data)
 }
-
-type intWithMarshalJSON int
 
 func (b intWithMarshalJSON) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf(`"Z%.2x"`, int(b))), nil
@@ -255,28 +272,12 @@ func (b *intWithMarshalJSON) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type intWithPtrMarshalJSON int
-
 func (b *intWithPtrMarshalJSON) MarshalJSON() ([]byte, error) {
 	return intWithMarshalJSON(*b).MarshalJSON()
 }
 
 func (b *intWithPtrMarshalJSON) UnmarshalJSON(data []byte) error {
 	return (*intWithMarshalJSON)(b).UnmarshalJSON(data)
-}
-
-type unmarshalTest struct {
-	in                    string
-	ptr                   interface{}
-	out                   interface{}
-	err                   error
-	useNumber             bool
-	golden                bool
-	disallowUnknownFields bool
-}
-
-type B struct {
-	B bool `json:",string"`
 }
 
 var unmarshalTests = []unmarshalTest{
@@ -697,7 +698,7 @@ var unmarshalTests = []unmarshalTest{
 }
 
 func TestMarshal(t *testing.T) {
-	b, err := Marshal(allValue)
+	b, err := MarshalWithSortMap(allValue)
 	if err != nil {
 		t.Fatalf("Marshal allValue: %v", err)
 	}
@@ -707,7 +708,7 @@ func TestMarshal(t *testing.T) {
 		diff(t, b, []byte(allValueCompact))
 		return
 	}
-	b, err = Marshal(pallValue)
+	b, err = MarshalWithSortMap(pallValue)
 	if err != nil {
 		t.Fatalf("Marshal pallValue: %v", err)
 	}
@@ -861,18 +862,18 @@ func TestUnmarshal(t *testing.T) {
 }
 
 func TestUnmarshalMarshal(t *testing.T) {
-	initBig()
+	initBig(true)
 	var v interface{}
 	if err := Unmarshal(jsonBig, &v); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	b, err := Marshal(v)
+	b, err := MarshalWithSortMap(v)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if !bytes.Equal(jsonBig, b) {
 		t.Errorf("Marshal jsonBig")
-		diff(t, b, jsonBig)
+		//diff(t, b, jsonBig)
 		return
 	}
 }
@@ -2075,7 +2076,7 @@ false
 func TestEncoder(t *testing.T) {
 	for i := 0; i <= len(streamTest); i++ {
 		var buf bytes.Buffer
-		enc := NewEncoder(&buf)
+		enc := NewSortedMapsEncoder(&buf)
 		// Check that enc.SetIndent("", "") turns off indentation.
 		enc.SetIndent(">", ".")
 		enc.SetIndent("", "")
@@ -2111,7 +2112,7 @@ false
 
 func TestEncoderIndent(t *testing.T) {
 	var buf bytes.Buffer
-	enc := NewEncoder(&buf)
+	enc := NewSortedMapsEncoder(&buf)
 	enc.SetIndent(">", ".")
 	for _, v := range streamTest {
 		enc.Encode(v)
@@ -2554,7 +2555,7 @@ func TestIndent(t *testing.T) {
 // Tests of a large random structure.
 
 func TestCompactBig(t *testing.T) {
-	initBig()
+	initBig(false)
 	var buf bytes.Buffer
 	if err := Compact(&buf, jsonBig); err != nil {
 		t.Fatalf("Compact: %v", err)
@@ -2569,7 +2570,7 @@ func TestCompactBig(t *testing.T) {
 
 func TestIndentBig(t *testing.T) {
 	t.Parallel()
-	initBig()
+	initBig(false)
 	var buf bytes.Buffer
 	if err := Indent(&buf, jsonBig, "", "\t"); err != nil {
 		t.Fatalf("Indent1: %v", err)
@@ -2630,7 +2631,7 @@ func TestIndentErrors(t *testing.T) {
 }
 
 func TestNextValueBig(t *testing.T) {
-	initBig()
+	initBig(false)
 	var scan scanner
 	item, rest, err := scan.nextValue(jsonBig)
 	if err != nil {
@@ -2681,14 +2682,23 @@ func trim(b []byte) []byte {
 
 var jsonBig []byte
 
-func initBig() {
+func initBig(withMapSort bool) {
 	n := 10000
 	if testing.Short() {
 		n = 100
 	}
-	b, err := Marshal(genValue(n))
-	if err != nil {
-		panic(err)
+	var err error
+	var b []byte
+	if withMapSort {
+		b, err = MarshalWithSortMap(genValue(n))
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		b, err = Marshal(genValue(n))
+		if err != nil {
+			panic(err)
+		}
 	}
 	jsonBig = b
 }

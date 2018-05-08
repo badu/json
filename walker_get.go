@@ -10,38 +10,58 @@ import (
 	"reflect"
 )
 
-type KeyValuePair struct {
-	value   reflect.Value
-	keyName string
-}
+type (
+	/**
+	Unfortunatelly, removing the feature of sorting maps by their keys is not possible.
+	The documentation states :
+		The iteration order over maps is not specified and is not guaranteed to be the same from one iteration to the next. If a map entry that has not yet been reached is removed during iteration, the corresponding iteration value will not be produced. If a map entry is created during iteration, that entry may be produced during the iteration or may be skipped. The choice may vary for each entry created and from one iteration to the next. If the map is nil, the number of iterations is 0.
+	*/
+	KeyValuePair struct {
+		value   reflect.Value
+		keyName string
+	}
 
-type Walker interface {
-	NullValue()
-	InvalidValue()
-	Bool(value bool)
-	Int(value int64)
-	Uint(value uint64)
-	ByteSlice(value []byte)
-	TypedString(value string, Type reflect.Type)
-	Float(value float64, sixtyFourBit bool)
-	UnsupportedTypeEncoder(Type reflect.Type)
+	Walker interface {
+		NullValue()
+		InvalidValue()
+		Bool(value bool)
+		Int(value int64)
+		Uint(value uint64)
+		ByteSlice(value []byte)
+		TypedString(value string, Type reflect.Type)
+		Float(value float64, sixtyFourBit bool)
+		UnsupportedTypeEncoder(Type reflect.Type)
 
-	InspectValue(value reflect.Value) bool
-	InspectType(typ reflect.Type) bool
+		InspectValue(value reflect.Value) bool
+		InspectType(typ reflect.Type) bool
 
-	ArrayStart()
-	ArrayElem()
-	ArrayEnd()
+		ArrayStart()
+		ArrayElem()
+		ArrayEnd()
 
-	StructStart(value reflect.Value) []field
-	StructField(whichField field)
-	NextStructField()
-	StructEnd()
-	// returns a slice of stored key value pairs and a bool signaling we're sorting keys
-	MapStart(keys []reflect.Value) ([]KeyValuePair, bool)
-	MapKey(key string)
-	NextMapEntry()
-	MapEnd()
+		StructStart(value reflect.Value) []MarshalField
+		StructField(currentField MarshalField, isFirst bool)
+		StructEnd()
+		// returns a slice of stored key value pairs and a bool signaling we're sorting keys
+		MapStart(keys []reflect.Value) ([]KeyValuePair, bool)
+		MapKey(key string)
+		NextMapEntry()
+		MapEnd()
+	}
+)
+
+func (w *KeyValuePair) resolve() error {
+	switch w.value.Kind() {
+	case reflect.String:
+		w.keyName = w.value.String()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		w.keyName = FormatInt(w.value.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		w.keyName = FormatUint(w.value.Uint())
+	default:
+		panic("unexpected map key type")
+	}
+	return nil
 }
 
 func marshalWalk(v interface{}, walker Walker) {
@@ -141,11 +161,11 @@ func arrayEncoder(v reflect.Value, walker Walker) {
 }
 
 func structEncoder(v reflect.Value, walker Walker) {
-	fields := walker.StructStart(v)
-
 	first := true
 
-	for _, field := range fields {
+	fieldsInfo := walker.StructStart(v)
+
+	for _, f := range fieldsInfo {
 		// restoring to original value type, since it gets altered below
 		valueType := v.Type()
 
@@ -155,7 +175,7 @@ func structEncoder(v reflect.Value, walker Walker) {
 			fmt.Fprintf(os.Stderr, "%#v indexes\n", field.indexes)
 		}
 		**/
-		for _, idx := range field.indexes {
+		for _, idx := range f.indexes {
 			if valueType.Kind() == reflect.Ptr {
 				valueType = valueType.Elem()
 				if fieldValue.IsNil() {
@@ -168,17 +188,23 @@ func structEncoder(v reflect.Value, walker Walker) {
 			fieldValue = fieldValue.Field(idx)
 		}
 
-		if !fieldValue.IsValid() || field.willOmit && isEmptyValue(fieldValue) {
+		// omitted invalid
+		if !fieldValue.IsValid() {
 			continue
 		}
 
-		if first {
-			first = false
-		} else {
-			walker.NextStructField()
+		if isEmptyValue(fieldValue) {
+			// omit should be decided by walker
+			if f.willOmit {
+				continue
+			}
 		}
 
-		walker.StructField(field)
+		walker.StructField(f, first)
+
+		if first {
+			first = false
+		}
 
 		walk(fieldValue, walker)
 	}

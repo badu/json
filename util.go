@@ -25,7 +25,7 @@ func IsValidNumber(target string) bool {
 		return false
 	}
 
-	// Optional -
+	// Optional - (minus)
 	if target[0] == minus {
 		target = target[1:]
 		if len(target) == 0 {
@@ -56,8 +56,7 @@ func IsValidNumber(target string) bool {
 		}
 	}
 
-	// e or E followed by an optional - or + and
-	// 1 or more digits.
+	// e or E followed by an optional - or + and 1 or more digits.
 	if len(target) >= 2 && (target[0] == eChr || target[0] == bigEChr) {
 		target = target[1:]
 		if target[0] == plus || target[0] == minus {
@@ -250,9 +249,208 @@ func isValidTag(tag string) bool {
 
 // typeFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
+func marshalFields(value reflect.Value) []MarshalField {
+	// Embedded fields to explore at the current level and the next.
+	fields := []MarshalField{}
+	next := []MarshalField{{Type: value.Type()}}
+
+	// Count of queued names for current level and the next.
+	count := map[reflect.Type]int{}
+	nextCount := map[reflect.Type]int{}
+
+	// Types already visited at an earlier level.
+	visited := map[reflect.Type]bool{}
+
+	// Fields found.
+	var result []MarshalField
+
+	//println("Start.")
+	for len(next) > 0 {
+		fields, next = next, fields[:0]
+		count, nextCount = nextCount, map[reflect.Type]int{}
+
+		for _, curField := range fields {
+			if visited[curField.Type] {
+				continue
+			}
+			visited[curField.Type] = true
+
+			// Scan curField.Type for fields to include.
+			for i := 0; i < curField.Type.NumField(); i++ {
+				structField := curField.Type.Field(i)
+				isNonExported := len(structField.PkgPath) > 0
+				if structField.Anonymous {
+					typ := structField.Type
+					if typ.Kind() == reflect.Ptr {
+						typ = typ.Elem()
+					}
+					if isNonExported && typ.Kind() != reflect.Struct {
+						// Ignore embedded fields of unexported non-struct types.
+						continue
+					}
+					// Do not ignore embedded fields of unexported struct types since they may have exported fields.
+				} else if isNonExported {
+					// Ignore unexported non-embedded fields.
+					continue
+				}
+
+				// start processing tags
+				tag := structField.Tag.Get(jsonTagName)
+				if tag == "-" {
+					continue
+				}
+
+				name, opts := parseTag(tag)
+				if !isValidTag(name) {
+					// TODO : signal error
+					name = ""
+				}
+
+				indexes := make([]int, len(curField.indexes)+1)
+				copy(indexes, curField.indexes)
+				indexes[len(curField.indexes)] = i
+
+				fieldType := structField.Type
+
+				if len(fieldType.Name()) == 0 && fieldType.Kind() == reflect.Ptr {
+					// Follow pointer.
+					fieldType = fieldType.Elem()
+				}
+
+				fieldKind := fieldType.Kind()
+
+				// Only strings, floats, integers, and booleans implies isBasic.
+				isBasic := false
+				if opts.Contains(stringTagOption) {
+					switch fieldKind {
+					case reflect.Bool,
+						reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+						reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+						reflect.Float32, reflect.Float64,
+						reflect.String:
+						isBasic = true
+					}
+				}
+
+				// Record found field and index sequence.
+				if len(name) > 0 || !structField.Anonymous || fieldKind != reflect.Struct {
+					tagged := len(name) > 0
+					if len(name) == 0 {
+						name = structField.Name
+					}
+					/**
+					if len(indexes) > 1 {
+						println("Yes, " + name + " has " + FormatInt(int64(len(indexes))) + " indexes.")
+					}
+					**/
+					f := MarshalField{
+						name:     name,
+						tag:      tagged,
+						indexes:  indexes,
+						Type:     fieldType,
+						willOmit: opts.Contains(omitTagOption),
+						isBasic:  isBasic,
+					}
+
+					result = append(result, f)
+					if count[curField.Type] > 1 {
+						// If there were multiple instances, add a second, so that the annihilation code will see a duplicate.
+						// It only cares about the distinction between 1 or 2, so don't bother generating any more copies.
+						result = append(result, result[len(result)-1])
+					}
+					continue
+				}
+
+				// Record new anonymous struct to explore in next round.
+				nextCount[fieldType]++
+				if nextCount[fieldType] == 1 {
+					//println("Recording.")
+					f := MarshalField{name: fieldType.Name(), indexes: indexes, Type: fieldType}
+
+					next = append(next, f)
+				}
+			}
+		}
+	}
+	//println("Finished.")
+
+	sort.Slice(result, func(i, j int) bool {
+		x := result
+		// sort field by name, breaking ties with depth, then breaking ties with "name came from json tag", then breaking ties with index sequence.
+		if x[i].name != x[j].name {
+			return x[i].name < x[j].name
+		}
+		if len(x[i].indexes) != len(x[j].indexes) {
+			return len(x[i].indexes) < len(x[j].indexes)
+		}
+		if x[i].tag != x[j].tag {
+			return x[i].tag
+		}
+		return marshalByIndex(x).Less(i, j)
+	})
+
+	// Delete all fields that are hidden by the Go rules for embedded fields, except that fields with JSON tags are promoted.
+
+	// The fields are sorted in primary order of name, secondary order of field index length. Loop over names; for each name, delete hidden fields by choosing the one dominant field that survives.
+	out := result[:0]
+	for advance, i := 0, 0; i < len(result); i += advance {
+		// One iteration per name. Find the sequence of fields with the name of this first field.
+		fi := result[i]
+		name := fi.name
+		for advance = 1; i+advance < len(result); advance++ {
+			fj := result[i+advance]
+			if fj.name != name {
+				break
+			}
+		}
+		if advance == 1 { // Only one field with this name
+			out = append(out, fi)
+			continue
+		}
+		dominant, ok := dominantMarshalField(result[i : i+advance])
+		if ok {
+			out = append(out, dominant)
+		}
+	}
+
+	result = out
+	sort.Sort(marshalByIndex(result))
+
+	return result
+}
+
+func dominantMarshalField(fields []MarshalField) (MarshalField, bool) {
+	// The fields are sorted in increasing index-length order. The winner must therefore be one with the shortest index length. Drop all longer entries, which is easy: just truncate the slice.
+	length := len(fields[0].indexes)
+	tagged := -1 // Index of first tagged field.
+	for i, f := range fields {
+		if len(f.indexes) > length {
+			fields = fields[:i]
+			break
+		}
+		if f.tag {
+			if tagged >= 0 {
+				// Multiple tagged fields at the same level: conflict. Return no field.
+				return MarshalField{}, false
+			}
+			tagged = i
+		}
+	}
+	if tagged >= 0 {
+		return fields[tagged], true
+	}
+	// All remaining fields have the same length. If there's more than one, we have a conflict (two fields named "X" at the same level) and we return no field.
+	if len(fields) > 1 {
+		return MarshalField{}, false
+	}
+	return fields[0], true
+}
+
+// typeFields returns a list of fields that JSON should recognize for the given type.
+// The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
 func typeFields(value reflect.Value) []field {
 	// Embedded fields to explore at the current level and the next.
-	var fields []field
+	fields := []field{}
 	next := []field{{Type: value.Type()}}
 
 	// Count of queued names for current level and the next.
@@ -265,6 +463,7 @@ func typeFields(value reflect.Value) []field {
 	// Fields found.
 	var result []field
 
+	println("Start.")
 	for len(next) > 0 {
 		fields, next = next, fields[:0]
 		count, nextCount = nextCount, map[reflect.Type]int{}
@@ -337,19 +536,21 @@ func typeFields(value reflect.Value) []field {
 					if len(name) == 0 {
 						name = structField.Name
 					}
-					/**
 					if len(indexes) > 1 {
-						println("Yes, " + name + " has " + strconv.Itoa(len(indexes)) + " indexes.")
+						println("Yes, " + name + " has " + FormatInt(int64(len(indexes))) + " indexes.")
 					}
-					**/
-					result = append(result, fillField(field{
+					f := field{
 						name:     name,
 						tag:      tagged,
 						indexes:  indexes,
 						Type:     fieldType,
 						willOmit: opts.Contains(omitTagOption),
 						isBasic:  isBasic,
-					}))
+					}
+					f.nameBytes = []byte(f.name)
+					f.equalFold = foldFunc(f.nameBytes)
+
+					result = append(result, f)
 					if count[curField.Type] > 1 {
 						// If there were multiple instances, add a second, so that the annihilation code will see a duplicate.
 						// It only cares about the distinction between 1 or 2, so don't bother generating any more copies.
@@ -361,11 +562,17 @@ func typeFields(value reflect.Value) []field {
 				// Record new anonymous struct to explore in next round.
 				nextCount[fieldType]++
 				if nextCount[fieldType] == 1 {
-					next = append(next, fillField(field{name: fieldType.Name(), indexes: indexes, Type: fieldType}))
+					println("Recording.")
+					f := field{name: fieldType.Name(), indexes: indexes, Type: fieldType}
+					f.nameBytes = []byte(f.name)
+					f.equalFold = foldFunc(f.nameBytes)
+
+					next = append(next, f)
 				}
 			}
 		}
 	}
+	println("Finished.")
 
 	sort.Slice(result, func(i, j int) bool {
 		x := result
@@ -452,12 +659,6 @@ func parseTag(tag string) (string, tagOptions) {
 		return tag[:idx], tagOptions(tag[idx+1:])
 	}
 	return tag, tagOptions("")
-}
-
-func fillField(f field) field {
-	f.nameBytes = []byte(f.name)
-	f.equalFold = foldFunc(f.nameBytes)
-	return f
 }
 
 // foldFunc returns one of four different case folding equivalence functions, from most general (and slow) to fastest:

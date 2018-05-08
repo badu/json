@@ -391,8 +391,8 @@ func (d *decodeState) doMap(walker *SetWalker) {
 func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *field {
 	var result *field
 
-	m, _ := unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
-	fields := m[value.Type()]
+	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
+	fields := cachedFields[value.Type()]
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
@@ -402,25 +402,25 @@ func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *fiel
 		}
 
 		unmarshalerFieldCache.mu.Lock()
-		m, _ = unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
-		newM := make(map[reflect.Type][]field, len(m)+1)
-		for k, v := range m {
-			newM[k] = v
+		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
+		newFieldsMap := make(map[reflect.Type][]field, len(cachedFields)+1)
+		for k, v := range cachedFields {
+			newFieldsMap[k] = v
 		}
-		newM[value.Type()] = fields
-		unmarshalerFieldCache.value.Store(newM)
+		newFieldsMap[value.Type()] = fields
+		unmarshalerFieldCache.value.Store(newFieldsMap)
 		unmarshalerFieldCache.mu.Unlock()
 	}
 
 	for i := range fields {
-		field := &fields[i]
-		if bytes.Equal(field.nameBytes, fieldName) {
-			result = field
+		curField := &fields[i]
+		if bytes.Equal(curField.nameBytes, fieldName) {
+			result = curField
 			break
 		}
 		// TODO : equal fold should be searched in a sync.Map by the fieldName -> map[ []byte ] func(srcKey, destKey []byte) bool
-		if result == nil && field.equalFold(field.nameBytes, fieldName) {
-			result = field
+		if result == nil && curField.equalFold(curField.nameBytes, fieldName) {
+			result = curField
 		}
 	}
 	return result
