@@ -8,29 +8,42 @@ package json
 
 import (
 	"reflect"
+	"strings"
+	"time"
 )
 
 type (
 	/**
-	Unfortunatelly, removing the feature of sorting maps by their keys is not possible.
+	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
 	The documentation states :
 		The iteration order over maps is not specified and is not guaranteed to be the same from one iteration to the next. If a map entry that has not yet been reached is removed during iteration, the corresponding iteration value will not be produced. If a map entry is created during iteration, that entry may be produced during the iteration or may be skipped. The choice may vary for each entry created and from one iteration to the next. If the map is nil, the number of iterations is 0.
+	For this reason, sorting map keys is optional and default false.
 	*/
 	KeyValuePair struct {
 		value   reflect.Value
 		keyName string
 	}
+	// A field represents a single field found in a struct.
+	MarshalField struct {
+		indexes  []int
+		name     string
+		Type     reflect.Type
+		tag      bool
+		willOmit bool
+		isBasic  bool
+	}
 
 	Walker interface {
 		NullValue()
 		InvalidValue()
+		UnsupportedTypeEncoder(Type reflect.Type)
+
 		Bool(value bool)
 		Int(value int64)
 		Uint(value uint64)
 		ByteSlice(value []byte)
 		TypedString(value string, Type reflect.Type)
-		Float(value float64, sixtyFourBit bool)
-		UnsupportedTypeEncoder(Type reflect.Type)
+		Float(value float64, bitSize int)
 
 		InspectValue(value reflect.Value) bool
 		InspectType(typ reflect.Type) bool
@@ -39,13 +52,14 @@ type (
 		ArrayElem()
 		ArrayEnd()
 
+		ReadFields(value reflect.Value) []MarshalField
 		StructStart(value reflect.Value) []MarshalField
 		StructField(currentField MarshalField, isFirst bool)
 		StructEnd()
+
 		// returns a slice of stored key value pairs and a bool signaling we're sorting keys
 		MapStart(keys []reflect.Value) ([]KeyValuePair, bool)
-		MapKey(key string)
-		NextMapEntry()
+		MapKey(key string, isFirst bool)
 		MapEnd()
 	}
 )
@@ -92,9 +106,9 @@ func basic(v reflect.Value, walker Walker) {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		walker.Uint(v.Uint())
 	case reflect.Float32:
-		walker.Float(v.Float(), false)
+		walker.Float(v.Float(), 32)
 	case reflect.Float64:
-		walker.Float(v.Float(), true)
+		walker.Float(v.Float(), 64)
 	case reflect.String:
 		walker.TypedString(v.String(), v.Type())
 	case reflect.Interface:
@@ -161,24 +175,21 @@ func arrayEncoder(v reflect.Value, walker Walker) {
 }
 
 func structEncoder(v reflect.Value, walker Walker) {
-	first := true
 
 	fieldsInfo := walker.StructStart(v)
 
+	first := true
 	for _, f := range fieldsInfo {
 		// restoring to original value type, since it gets altered below
 		valueType := v.Type()
 
 		fieldValue := v
-		/**
-		if len(field.indexes) > 1 {
-			fmt.Fprintf(os.Stderr, "%#v indexes\n", field.indexes)
-		}
-		**/
+
 		for _, idx := range f.indexes {
 			if valueType.Kind() == reflect.Ptr {
 				valueType = valueType.Elem()
 				if fieldValue.IsNil() {
+					// TODO : maybe avoid this ?
 					fieldValue = reflect.Value{}
 					break
 				}
@@ -194,19 +205,120 @@ func structEncoder(v reflect.Value, walker Walker) {
 		}
 
 		if isEmptyValue(fieldValue) {
-			// omit should be decided by walker
+			// TODO : omit should be decided by walker
 			if f.willOmit {
 				continue
 			}
 		}
+		// Serialize Nulls Condition : 1. is a struct which has a name that starts with "Null" and must have "omitempty"
+		if strings.HasPrefix(f.Type.Name(), "Null") && fieldValue.Kind() == reflect.Struct && f.willOmit {
+			subFields := walker.ReadFields(fieldValue)
+			// 2. has exactly two fields : one boolean (called Valid) and one of a basic type (called as the basic type - e.g. "String")
+			if len(subFields) == 2 {
+				foundValid := false
+				foundBasic := false
+
+				var validField, carrierField reflect.Value
+
+				for _, sf := range subFields {
+					if sf.name == "Valid" {
+						foundValid = true
+						subFieldType := fieldValue.Type()
+						validField = fieldValue
+						for _, idx2 := range sf.indexes {
+							if subFieldType.Kind() == reflect.Ptr {
+								subFieldType = subFieldType.Elem()
+								if validField.IsNil() {
+									validField = reflect.Value{}
+									break
+								}
+							}
+							subFieldType = subFieldType.Field(idx2).Type
+							validField = validField.Field(idx2)
+						}
+					} else {
+
+						foundBasic = true
+						subFieldType := fieldValue.Type()
+						carrierField = fieldValue
+						for _, idx2 := range sf.indexes {
+							if subFieldType.Kind() == reflect.Ptr {
+								subFieldType = subFieldType.Elem()
+								if carrierField.IsNil() {
+									carrierField = reflect.Value{}
+									break
+								}
+							}
+							subFieldType = subFieldType.Field(idx2).Type
+							carrierField = carrierField.Field(idx2)
+						}
+
+					}
+				}
+
+				if foundBasic && foundValid {
+					if validField.Bool() {
+						switch carrierField.Kind() {
+						case reflect.Bool:
+							walker.StructField(f, first)
+							walker.Bool(carrierField.Bool())
+							continue
+						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+							walker.StructField(f, first)
+							walker.Int(carrierField.Int())
+							continue
+						case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+							walker.StructField(f, first)
+							walker.Uint(carrierField.Uint())
+							continue
+						case reflect.Float32:
+							walker.StructField(f, first)
+							walker.Float(carrierField.Float(), 32)
+							continue
+						case reflect.Float64:
+							walker.StructField(f, first)
+							walker.Float(carrierField.Float(), 64)
+							continue
+						case reflect.String:
+							walker.StructField(f, first)
+							walker.TypedString(carrierField.String(), carrierField.Type())
+							continue
+						default:
+							// even if it's time, we're allowing Marshaler implementations (just to be able to format it)
+						}
+					} else {
+						switch carrierField.Kind() {
+						case reflect.Bool:
+							continue
+						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+							continue
+						case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+							continue
+						case reflect.Float32:
+							continue
+						case reflect.Float64:
+							continue
+						case reflect.String:
+							continue
+						default:
+							// if it's time, we're avoiding writing "null"
+							_, isTime := carrierField.Interface().(time.Time)
+							if isTime {
+								continue
+							}
+						}
+					}
+
+				}
+			}
+		}
 
 		walker.StructField(f, first)
-
+		walk(fieldValue, walker)
 		if first {
 			first = false
 		}
 
-		walk(fieldValue, walker)
 	}
 
 	walker.StructEnd()
@@ -238,20 +350,13 @@ func mapEncoder(v reflect.Value, walker Walker) {
 	sortedKeys, hasSort := walker.MapStart(v.MapKeys())
 	if hasSort {
 		for i, key := range sortedKeys {
-			if i > 0 {
-				walker.NextMapEntry()
-			}
-			walker.MapKey(key.keyName)
+			walker.MapKey(key.keyName, i == 0)
 			walk(v.MapIndex(key.value), walker)
-
 		}
 	} else {
 		for i, key := range v.MapKeys() {
-			if i > 0 {
-				walker.NextMapEntry()
-			}
-
 			keyName := ""
+			// TODO : shouldn't this check be performed before we start
 			switch key.Kind() {
 			case reflect.String:
 				keyName = key.String()
@@ -262,10 +367,8 @@ func mapEncoder(v reflect.Value, walker Walker) {
 			default:
 				panic("Bad key kind!")
 			}
-
-			walker.MapKey(keyName)
+			walker.MapKey(keyName, i == 0)
 			walk(v.MapIndex(key), walker)
-
 		}
 	}
 	walker.MapEnd()

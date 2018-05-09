@@ -187,19 +187,21 @@ type (
 		opts         encOpts
 	}
 
-	// decodeState represents the state while decoding a JSON value.
+	errorContext struct {
+		Struct string
+		Field  string
+	}
+
+	// decodeState represents the state while decoding a JSON value
 	decodeState struct {
-		data         []byte
 		scan         scanner
 		nextScan     scanner // for calls to nextValue
-		errorContext struct {
-			Struct string
-			Field  string
-		}
-		offset     int // provides context for type errors , read offset in data
-		useNumber  bool
-		useStrict  bool // don't allow the input to contains object keys which do not match any non-ignored, exported fields in the destination.
-		savedError error
+		errorContext errorContext
+		data         []byte
+		offset       int // provides context for type errors , read offset in data
+		savedError   error
+		useNumber    bool
+		useStrict    bool // don't allow the input to contains object keys which do not match any non-ignored, exported fields in the destination.
 	}
 
 	// An UnsupportedTypeError is returned by Marshal when attempting
@@ -223,15 +225,6 @@ type (
 		willSortMapKeys bool // map keys sorting. Default false
 	}
 
-	// A field represents a single field found in a struct.
-	MarshalField struct {
-		name     string
-		indexes  []int
-		Type     reflect.Type
-		tag      bool
-		willOmit bool
-		isBasic  bool
-	}
 	marshalByIndex []MarshalField // byIndex sorts field by index sequence.
 
 	qualFn func(srcKey, destKey []byte) bool
@@ -272,24 +265,24 @@ type (
 		step       func(byte) int // The step is a func to be called to execute the next transition.Also tried using an integer constant and a single func with a switch, but using the func directly was 10% faster on a 64-bit Mac Mini, and it's nicer to read.
 		redoState  func(byte) int
 		parseState []int // Stack of what we're in the middle of - array values, object keys, object values.
-		bytes      int64 // total bytes consumed, updated by decoder.Decode
 		redoCode   int
 		err        error // Error that happened, if any.
+		bytes      int64 // total bytes consumed, updated by decoder.Decode
 		endTop     bool  // Reached end of top-level value.
 		redo       bool  // 1-byte redo (see undo method)
 	}
 
 	// A Decoder reads and decodes JSON values from an input stream.
 	Decoder struct {
-		reader     io.Reader
-		buf        []byte
 		state      decodeState
-		scanp      int   // start of unread data in buf
-		scanned    int64 // amount of data already scanned
 		scan       scanner
-		err        error
-		tokenState int
 		tokenStack []int
+		buf        []byte
+		reader     io.Reader
+		err        error
+		scanned    int64 // amount of data already scanned
+		scanp      int   // start of unread data in buf
+		tokenState int
 	}
 
 	// An Encoder writes JSON values to an output stream.

@@ -396,7 +396,7 @@ func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *fiel
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = typeFields(value)
+		fields = unmarshalerFields(value)
 		if fields == nil {
 			fields = []field{}
 		}

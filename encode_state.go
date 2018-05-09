@@ -288,79 +288,48 @@ func (e *encodeState) TypedString(value string, Type reflect.Type) {
 	}
 }
 
-func (e *encodeState) Float(value float64, isSixtyFour bool) {
-	if !isSixtyFour {
-		if math.IsInf(value, 0) || math.IsNaN(value) {
-			e.error(&UnsupportedValueError{FormatFloat(value, 32)})
-		}
+func (e *encodeState) Float(value float64, bitSize int) {
 
-		// Convert as if by ES6 number to string conversion.
-		// This matches most other JSON generators.
-		// See golang.org/issue/6384 and golang.org/issue/14135.
-		// Like fmt %g, but the exponent cutoffs are different
-		// and exponents themselves are not padded to two digits.
-		b := e.scratch[:0]
-		abs := math.Abs(value)
-		fmt := byte('f')
-		// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
-		if abs != 0 {
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		e.error(&UnsupportedValueError{FormatFloat(value, bitSize)})
+	}
+
+	// Convert as if by ES6 number to string conversion.
+	// This matches most other JSON generators.
+	// See golang.org/issue/6384 and golang.org/issue/14135.
+	// Like fmt %g, but the exponent cutoffs are different
+	// and exponents themselves are not padded to two digits.
+	b := e.scratch[:0]
+	abs := math.Abs(value)
+	fmt := fChr
+	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
+	if abs != 0 {
+		if bitSize == 32 {
 			if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
-				fmt = 'e'
+				fmt = eChr
 			}
-		}
-		b = AppendFloat(b, value, fmt, 32)
-		if fmt == 'e' {
-			// clean up e-09 to e-9
-			n := len(b)
-			if n >= 4 && b[n-4] == 'e' && b[n-3] == minus && b[n-2] == zero {
-				b[n-2] = b[n-1]
-				b = b[:n-1]
-			}
-		}
-
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(b)
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	} else {
-		if math.IsInf(value, 0) || math.IsNaN(value) {
-			e.error(&UnsupportedValueError{FormatFloat(value, 64)})
-		}
-
-		// Convert as if by ES6 number to string conversion.
-		// This matches most other JSON generators.
-		// See golang.org/issue/6384 and golang.org/issue/14135.
-		// Like fmt %g, but the exponent cutoffs are different
-		// and exponents themselves are not padded to two digits.
-		b := e.scratch[:0]
-		abs := math.Abs(value)
-		fmt := byte('f')
-		// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
-		if abs != 0 {
+		} else {
 			if abs < 1e-6 || abs >= 1e21 {
-				fmt = 'e'
+				fmt = eChr
 			}
 		}
-		b = AppendFloat(b, value, fmt, 64)
-		if fmt == 'e' {
-			// clean up e-09 to e-9
-			n := len(b)
-			if n >= 4 && b[n-4] == 'e' && b[n-3] == minus && b[n-2] == zero {
-				b[n-2] = b[n-1]
-				b = b[:n-1]
-			}
+	}
+	b = AppendFloat(b, value, fmt, bitSize)
+	if fmt == eChr {
+		// clean up e-09 to e-9
+		n := len(b)
+		if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
+			b[n-2] = b[n-1]
+			b = b[:n-1]
 		}
+	}
 
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(b)
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	e.Write(b)
+	if e.opts.quoted {
+		e.WriteByte(quote)
 	}
 }
 
@@ -420,9 +389,13 @@ func (e *encodeState) ArrayEnd() {
 	e.WriteByte(squareClose)
 }
 
-// marshalerFieldCache is like typeFields but uses a cache to avoid repeated work.
+// marshalerFieldCache is like unmarshalerFields but uses a cache to avoid repeated work.
 func (e *encodeState) StructStart(value reflect.Value) []MarshalField {
 	e.WriteByte(curlOpen)
+	return e.ReadFields(value)
+}
+
+func (e *encodeState) ReadFields(value reflect.Value) []MarshalField {
 
 	cachedFields, _ := marshalerFieldCache.value.Load().(map[reflect.Type][]MarshalField)
 	fields := cachedFields[value.Type()]
@@ -432,7 +405,7 @@ func (e *encodeState) StructStart(value reflect.Value) []MarshalField {
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
-	fields = marshalFields(value)
+	fields = marshalFields(value.Type())
 	if fields == nil {
 		return []MarshalField{}
 	}
@@ -496,11 +469,10 @@ func (e *encodeState) MapEnd() {
 	e.WriteByte(curlClose)
 }
 
-func (e *encodeState) NextMapEntry() {
-	e.WriteByte(comma)
-}
-
-func (e *encodeState) MapKey(key string) {
+func (e *encodeState) MapKey(key string, isFirst bool) {
+	if !isFirst {
+		e.WriteByte(comma)
+	}
 	e.string(key, e.opts.escapeHTML)
 	e.WriteByte(colon)
 }

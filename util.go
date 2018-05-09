@@ -247,12 +247,12 @@ func isValidTag(tag string) bool {
 	return true
 }
 
-// typeFields returns a list of fields that JSON should recognize for the given type.
+// marshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func marshalFields(value reflect.Value) []MarshalField {
+func marshalFields(typ reflect.Type) []MarshalField {
 	// Embedded fields to explore at the current level and the next.
 	fields := []MarshalField{}
-	next := []MarshalField{{Type: value.Type()}}
+	next := []MarshalField{{Type: typ}}
 
 	// Count of queued names for current level and the next.
 	count := map[reflect.Type]int{}
@@ -338,11 +338,7 @@ func marshalFields(value reflect.Value) []MarshalField {
 					if len(name) == 0 {
 						name = structField.Name
 					}
-					/**
-					if len(indexes) > 1 {
-						println("Yes, " + name + " has " + FormatInt(int64(len(indexes))) + " indexes.")
-					}
-					**/
+
 					f := MarshalField{
 						name:     name,
 						tag:      tagged,
@@ -353,6 +349,7 @@ func marshalFields(value reflect.Value) []MarshalField {
 					}
 
 					result = append(result, f)
+
 					if count[curField.Type] > 1 {
 						// If there were multiple instances, add a second, so that the annihilation code will see a duplicate.
 						// It only cares about the distinction between 1 or 2, so don't bother generating any more copies.
@@ -364,15 +361,12 @@ func marshalFields(value reflect.Value) []MarshalField {
 				// Record new anonymous struct to explore in next round.
 				nextCount[fieldType]++
 				if nextCount[fieldType] == 1 {
-					//println("Recording.")
 					f := MarshalField{name: fieldType.Name(), indexes: indexes, Type: fieldType}
-
 					next = append(next, f)
 				}
 			}
 		}
 	}
-	//println("Finished.")
 
 	sort.Slice(result, func(i, j int) bool {
 		x := result
@@ -446,9 +440,9 @@ func dominantMarshalField(fields []MarshalField) (MarshalField, bool) {
 	return fields[0], true
 }
 
-// typeFields returns a list of fields that JSON should recognize for the given type.
+// unmarshalerFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func typeFields(value reflect.Value) []field {
+func unmarshalerFields(value reflect.Value) []field {
 	// Embedded fields to explore at the current level and the next.
 	fields := []field{}
 	next := []field{{Type: value.Type()}}
@@ -463,7 +457,7 @@ func typeFields(value reflect.Value) []field {
 	// Fields found.
 	var result []field
 
-	println("Start.")
+	//println("Start.")
 	for len(next) > 0 {
 		fields, next = next, fields[:0]
 		count, nextCount = nextCount, map[reflect.Type]int{}
@@ -536,9 +530,11 @@ func typeFields(value reflect.Value) []field {
 					if len(name) == 0 {
 						name = structField.Name
 					}
+					/**
 					if len(indexes) > 1 {
 						println("Yes, " + name + " has " + FormatInt(int64(len(indexes))) + " indexes.")
 					}
+					**/
 					f := field{
 						name:     name,
 						tag:      tagged,
@@ -562,7 +558,7 @@ func typeFields(value reflect.Value) []field {
 				// Record new anonymous struct to explore in next round.
 				nextCount[fieldType]++
 				if nextCount[fieldType] == 1 {
-					println("Recording.")
+					//println("Recording.")
 					f := field{name: fieldType.Name(), indexes: indexes, Type: fieldType}
 					f.nameBytes = []byte(f.name)
 					f.equalFold = foldFunc(f.nameBytes)
@@ -572,8 +568,8 @@ func typeFields(value reflect.Value) []field {
 			}
 		}
 	}
-	println("Finished.")
-
+	//println("Finished.")
+	//TODO : remove sort - makes no sense
 	sort.Slice(result, func(i, j int) bool {
 		x := result
 		// sort field by name, breaking ties with depth, then breaking ties with "name came from json tag", then breaking ties with index sequence.

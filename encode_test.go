@@ -8,6 +8,7 @@ package json
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"log"
 	"math"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"testing"
+	"time"
 	"unicode"
 )
 
@@ -1148,5 +1150,92 @@ func TestNumberIsValid(t *testing.T) {
 		if jsonNumberRegexp.MatchString(test) {
 			t.Errorf("%s should be invalid but matches regexp", test)
 		}
+	}
+}
+
+type (
+	// Time is a nullable time.Time. It supports SQL and JSON serialization.
+	// It will marshal to null if null.
+	NullTime struct {
+		Time  time.Time
+		Valid bool
+	}
+)
+
+// MarshalJSON implements json.Marshaler.
+// It will encode null if this time is null.
+func (t NullTime) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	return t.Time.MarshalJSON()
+}
+
+func TestNewNull(t *testing.T) {
+	type (
+		// TODO : make issue on Github - EmptyStruct should be omitted if all properties are empty, isn't it?
+		EmptyStruct struct {
+			Id   int64  `json:"id,omitempty"`
+			Name string `json:"name,omitempty"`
+			Bool bool   `json:"bool,omitempty"`
+		}
+
+		// NullInt is an nullable int64.
+		// It does not consider zero values to be null.
+		// It will decode to null, not zero, if null.
+		NullInt struct {
+			sql.NullInt64
+		}
+
+		// String is a nullable string. It supports SQL and JSON serialization.
+		// It will marshal to null if null. Blank string input will be considered null.
+		NullString struct {
+			sql.NullString
+		}
+
+		Purchase struct {
+			ID          int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
+			EmptyName   string      `json:"emptyName,omitempty"`
+			EmptyId     int64       `json:"emptyId,omitempty"`
+			EmptyBool   bool        `json:"emptyBool,omitempty"`
+			UUID        NullString  `json:"nullUuid,omitempty"`
+			LicenseUUID NullString  `json:"nullLicenseUuid,omitempty"`
+			StartDate   NullTime    `json:"startDate,omitempty"`
+			EndDate     NullTime    `json:"endDate,omitempty"`
+			One         NullInt     `json:"one,omitempty"`
+			Two         NullInt     `json:"two,omitempty"`
+			MyStruct    EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
+		}
+	)
+	now := time.Now()
+	p := Purchase{
+		EmptyName: "Purchase Empty Name",
+		UUID: NullString{
+			sql.NullString{
+				Valid:  true,
+				String: "1234-1234-1234-1234-1234",
+			},
+		},
+		StartDate: NullTime{
+			Valid: true,
+			Time:  now,
+		},
+		Two: NullInt{
+			sql.NullInt64{
+				Valid: true,
+				Int64: 3000,
+			},
+		},
+	}
+
+	result, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := now.MarshalJSON()
+	expect := `{"emptyName":"Purchase Empty Name","nullUuid":"1234-1234-1234-1234-1234","startDate":` + string(r) + `,"two":3000,"myStruct":{}}`
+
+	if string(result) != expect {
+		t.Errorf(" got\n%s\nwant\n%s", string(result), expect)
 	}
 }
