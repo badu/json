@@ -14,18 +14,18 @@ func (enc *Encoder) Encode(v interface{}) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	e := newEncodeState()
-	e.opts = encOpts{escapeHTML: enc.escapeHTML, willSortMapKeys: enc.sortMapKeys}
-	err := e.marshal(v)
+	state := newEncodeState()
+	state.opts = encOpts{escapeHTML: enc.escapeHTML, willSortMapKeys: enc.sortMapKeys}
+	err := state.marshal(v)
 	if err != nil {
 		return err
 	}
 
 	// Terminate each value with a newline.
 	// This makes the output look a little nicer when debugging, and some kind of space is required if the encoded value was a number, so that the reader knows there aren't more digits coming.
-	e.WriteByte(newLine)
+	state.WriteByte(newLine)
 
-	b := e.Bytes()
+	b := state.Bytes()
 	if len(enc.indentPrefix) > 0 || len(enc.indentValue) > 0 {
 		if enc.indentBuf == nil {
 			enc.indentBuf = new(bytes.Buffer)
@@ -40,7 +40,7 @@ func (enc *Encoder) Encode(v interface{}) error {
 	if _, err = enc.w.Write(b); err != nil {
 		enc.err = err
 	}
-	encodeStatePool.Put(e)
+	encodeStatePool.Put(state)
 	return err
 }
 

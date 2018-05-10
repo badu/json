@@ -12,60 +12,6 @@ import (
 	"time"
 )
 
-type (
-	/**
-	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
-	The documentation states :
-		The iteration order over maps is not specified and is not guaranteed to be the same from one iteration to the next. If a map entry that has not yet been reached is removed during iteration, the corresponding iteration value will not be produced. If a map entry is created during iteration, that entry may be produced during the iteration or may be skipped. The choice may vary for each entry created and from one iteration to the next. If the map is nil, the number of iterations is 0.
-	For this reason, sorting map keys is optional and default false.
-	*/
-	KeyValuePair struct {
-		value   reflect.Value
-		keyName string
-	}
-
-	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
-	// A field represents a single field found in a struct.
-	MarshalField struct {
-		indexes  []int
-		name     string
-		Type     reflect.Type
-		tag      bool
-		willOmit bool
-		isBasic  bool
-	}
-
-	Walker interface {
-		NullValue()
-		InvalidValue()
-		UnsupportedTypeEncoder(Type reflect.Type)
-
-		Bool(value bool)
-		Int(value int64)
-		Uint(value uint64)
-		ByteSlice(value []byte)
-		TypedString(value string, Type reflect.Type)
-		Float(value float64, bitSize int)
-
-		InspectValue(value reflect.Value) bool
-		InspectType(typ reflect.Type) bool
-
-		ArrayStart()
-		ArrayElem()
-		ArrayEnd()
-
-		ReadFields(value reflect.Value) marshalFields
-		StructStart(value reflect.Value) marshalFields
-		StructField(currentField MarshalField, isFirst bool)
-		StructEnd()
-
-		// returns a slice of stored key value pairs and a bool signaling we're sorting keys
-		MapStart(keys []reflect.Value) ([]KeyValuePair, bool)
-		MapKey(key string, isFirst bool)
-		MapEnd()
-	}
-)
-
 func (w *KeyValuePair) resolve() error {
 	switch w.value.Kind() {
 	case reflect.String:
@@ -80,11 +26,11 @@ func (w *KeyValuePair) resolve() error {
 	return nil
 }
 
-func marshalWalk(v interface{}, walker Walker) {
+func marshalWalk(v interface{}, walker *encodeState) {
 	reflectValue(reflect.ValueOf(v), walker)
 }
 
-func reflectValue(v reflect.Value, walker Walker) {
+func reflectValue(v reflect.Value, walker *encodeState) {
 	if !v.IsValid() {
 		walker.InvalidValue()
 		return
@@ -92,14 +38,14 @@ func reflectValue(v reflect.Value, walker Walker) {
 	walk(v, walker)
 }
 
-func walk(v reflect.Value, walker Walker) {
+func walk(v reflect.Value, walker *encodeState) {
 	if !walker.InspectValue(v) {
 		return
 	}
 	basic(v, walker)
 }
 
-func basic(v reflect.Value, walker Walker) {
+func basic(v reflect.Value, walker *encodeState) {
 	switch v.Kind() {
 	case reflect.Bool:
 		walker.Bool(v.Bool())
@@ -138,7 +84,7 @@ func basic(v reflect.Value, walker Walker) {
 	}
 }
 
-func sliceEncoder(v reflect.Value, walker Walker) {
+func sliceEncoder(v reflect.Value, walker *encodeState) {
 	// read the slice element
 	deref := v.Type().Elem()
 	// Byte slices get special treatment; arrays don't.
@@ -163,7 +109,7 @@ func sliceEncoder(v reflect.Value, walker Walker) {
 	arrayEncoder(v, walker)
 }
 
-func arrayEncoder(v reflect.Value, walker Walker) {
+func arrayEncoder(v reflect.Value, walker *encodeState) {
 	walker.ArrayStart()
 	n := v.Len()
 	for i := 0; i < n; i++ {
@@ -176,7 +122,7 @@ func arrayEncoder(v reflect.Value, walker Walker) {
 	walker.ArrayEnd()
 }
 
-func structEncoder(v reflect.Value, walker Walker) {
+func structEncoder(v reflect.Value, walker *encodeState) {
 
 	fieldsInfo := walker.StructStart(v)
 
@@ -326,6 +272,7 @@ func structEncoder(v reflect.Value, walker Walker) {
 	walker.StructEnd()
 
 }
+
 func isEmptyValue(value reflect.Value) bool {
 	switch value.Kind() {
 	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
@@ -344,7 +291,7 @@ func isEmptyValue(value reflect.Value) bool {
 	return false
 }
 
-func mapEncoder(v reflect.Value, walker Walker) {
+func mapEncoder(v reflect.Value, walker *encodeState) {
 	if v.IsNil() {
 		walker.NullValue()
 		return

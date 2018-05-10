@@ -12,29 +12,6 @@ import (
 	"reflect"
 )
 
-type (
-	SetWalker struct {
-		reflect.Value
-		mapElem reflect.Value
-	}
-
-	qualFn          func(srcKey, destKey []byte) bool
-	unmarshalFields []UnmarshalField // unmarshalFields sorts field by index sequence.
-
-	// A field represents a single field found in a struct.
-	UnmarshalField struct {
-		name      string
-		nameBytes []byte // []byte(name)
-		indexes   []int
-		Type      reflect.Type
-		// TODO : extract equalFold from here and make a sync.Map (@see getFieldNamed of decode_state)
-		equalFold qualFn // bytes.EqualFold or equivalent
-		tag       bool
-		isBasic   bool
-		//willOmit  bool
-	}
-)
-
 func newWalker(v reflect.Value) *SetWalker {
 	return &SetWalker{Value: v}
 }

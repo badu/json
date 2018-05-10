@@ -35,13 +35,13 @@ func (e *encodeState) string(name string, escapeHTML bool) {
 				e.WriteByte(run)
 			case newLine:
 				e.WriteByte(backSlash)
-				e.WriteByte('n')
+				e.WriteByte(nChr)
 			case retChar:
 				e.WriteByte(backSlash)
-				e.WriteByte('r')
+				e.WriteByte(rChr)
 			case tab:
 				e.WriteByte(backSlash)
-				e.WriteByte('t')
+				e.WriteByte(tChr)
 			default:
 				// This encodes bytes < 0x20 except for \t, \n and \r.
 				// If escapeHTML is set, it also escapes <, >, and &
@@ -107,13 +107,13 @@ func (e *encodeState) stringBytes(s []byte, escapeHTML bool) {
 				e.WriteByte(b)
 			case newLine:
 				e.WriteByte(backSlash)
-				e.WriteByte('n')
+				e.WriteByte(nChr)
 			case retChar:
 				e.WriteByte(backSlash)
-				e.WriteByte('r')
+				e.WriteByte(rChr)
 			case tab:
 				e.WriteByte(backSlash)
-				e.WriteByte('t')
+				e.WriteByte(tChr)
 			default:
 				// This encodes bytes < 0x20 except for \t, \n and \r.
 				// If escapeHTML is set, it also escapes <, >, and &

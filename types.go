@@ -297,6 +297,49 @@ type (
 	// tagOptions is the string following a comma in a struct field's "json"
 	// tag, or the empty string. It does not include the leading comma.
 	tagOptions string
+
+	/**
+	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
+	The documentation states :
+		The iteration order over maps is not specified and is not guaranteed to be the same from one iteration to the next. If a map entry that has not yet been reached is removed during iteration, the corresponding iteration value will not be produced. If a map entry is created during iteration, that entry may be produced during the iteration or may be skipped. The choice may vary for each entry created and from one iteration to the next. If the map is nil, the number of iterations is 0.
+	For this reason, sorting map keys is optional and default false.
+	*/
+	KeyValuePair struct {
+		value   reflect.Value
+		keyName string
+	}
+
+	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
+	// A field represents a single field found in a struct.
+	MarshalField struct {
+		indexes  []int
+		name     string
+		Type     reflect.Type
+		tag      bool
+		willOmit bool
+		isBasic  bool
+	}
+
+	SetWalker struct {
+		reflect.Value
+		mapElem reflect.Value
+	}
+
+	qualFn          func(srcKey, destKey []byte) bool
+	unmarshalFields []UnmarshalField // unmarshalFields sorts field by index sequence.
+
+	// A field represents a single field found in a struct.
+	UnmarshalField struct {
+		name      string
+		nameBytes []byte // []byte(name)
+		indexes   []int
+		Type      reflect.Type
+		// TODO : extract equalFold from here and make a sync.Map (@see getFieldNamed of decode_state)
+		equalFold qualFn // bytes.EqualFold or equivalent
+		tag       bool
+		isBasic   bool
+		//willOmit  bool
+	}
 )
 
 var (
