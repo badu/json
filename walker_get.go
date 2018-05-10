@@ -23,6 +23,8 @@ type (
 		value   reflect.Value
 		keyName string
 	}
+
+	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
 	// A field represents a single field found in a struct.
 	MarshalField struct {
 		indexes  []int
@@ -52,8 +54,8 @@ type (
 		ArrayElem()
 		ArrayEnd()
 
-		ReadFields(value reflect.Value) []MarshalField
-		StructStart(value reflect.Value) []MarshalField
+		ReadFields(value reflect.Value) marshalFields
+		StructStart(value reflect.Value) marshalFields
 		StructField(currentField MarshalField, isFirst bool)
 		StructEnd()
 

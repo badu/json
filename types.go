@@ -225,24 +225,6 @@ type (
 		willSortMapKeys bool // map keys sorting. Default false
 	}
 
-	marshalByIndex []MarshalField // byIndex sorts field by index sequence.
-
-	qualFn func(srcKey, destKey []byte) bool
-	// A field represents a single field found in a struct.
-	field struct {
-		name      string
-		nameBytes []byte // []byte(name)
-		indexes   []int
-		Type      reflect.Type
-		// TODO : extract equalFold from here and make a sync.Map (@see getFieldNamed of decode_state)
-		equalFold qualFn // bytes.EqualFold or equivalent
-		tag       bool
-		willOmit  bool
-		isBasic   bool
-	}
-
-	byIndex []field // byIndex sorts field by index sequence.
-
 	// A SyntaxError is a description of a JSON syntax error.
 	SyntaxError struct {
 		msg    string // description of error
@@ -311,9 +293,6 @@ type (
 	// 	nil, for JSON null
 	//
 	Token interface{}
-
-	// A Delim is a JSON array or object delimiter, one of [ ] { or }.
-	Delim rune
 
 	// tagOptions is the string following a comma in a struct field's "json"
 	// tag, or the empty string. It does not include the leading comma.

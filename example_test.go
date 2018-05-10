@@ -98,27 +98,38 @@ func ExampleDecoder_Token() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("%T: %v", t, t)
+		switch t {
+		case curlOpen:
+			fmt.Print("{")
+		case curlClose:
+			fmt.Print("}")
+		case squareOpen:
+			fmt.Print("[")
+		case squareClose:
+			fmt.Print("]")
+		default:
+			fmt.Printf("%T: %v", t, t)
+		}
 		if dec.More() {
 			fmt.Printf(" (more)")
 		}
 		fmt.Printf("\n")
 	}
 	// Output:
-	// json.Delim: { (more)
+	// { (more)
 	// string: Message (more)
 	// string: Hello (more)
 	// string: Array (more)
-	// json.Delim: [ (more)
+	// [ (more)
 	// float64: 1 (more)
 	// float64: 2 (more)
 	// float64: 3
-	// json.Delim: ] (more)
+	// ] (more)
 	// string: Null (more)
 	// <nil>: <nil> (more)
 	// string: Number (more)
 	// float64: 1.234
-	// json.Delim: }
+	// }
 }
 
 // This example uses a Decoder to decode a streaming array of JSON objects.
@@ -142,7 +153,12 @@ func ExampleDecoder_Decode_stream() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%T: %v\n", t, t)
+	switch t {
+	case squareOpen:
+		fmt.Print("[\n")
+	default:
+		panic("Expecting square bracket open.")
+	}
 
 	// while the array contains values
 	for dec.More() {
@@ -161,16 +177,20 @@ func ExampleDecoder_Decode_stream() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%T: %v\n", t, t)
-
+	switch t {
+	case squareClose:
+		fmt.Print("]\n")
+	default:
+		panic("Expecting square bracket close.")
+	}
 	// Output:
-	// json.Delim: [
+	// [
 	// Ed: Knock knock.
 	// Sam: Who's there?
 	// Ed: Go fmt.
 	// Sam: Go fmt who?
 	// Ed: Go fmt yourself!
-	// json.Delim: ]
+	// ]
 
 }
 

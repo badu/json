@@ -304,6 +304,254 @@ var (
 	float64info = floatInfo{52, 11, -1023}
 )
 
+func Atof32(src []byte) (f float32, err error) {
+	if val, ok := special(src); ok {
+		return float32(val), nil
+	}
+
+	// Parse mantissa and exponent.
+	mantissa, exp, neg, trunc, ok := readFloat(src)
+	if ok {
+		// Try pure floating-point arithmetic conversion.
+		if !trunc {
+			if f, ok := atof32exact(mantissa, exp, neg); ok {
+				return f, nil
+			}
+		}
+		// Try another fast path.
+		ext := new(extFloat)
+		if ok := ext.assignDecimal(mantissa, exp, neg, trunc, &float32info); ok {
+			b, ovf := ext.floatBits(&float32info)
+			f = math.Float32frombits(uint32(b))
+			if ovf {
+				err = rangeError(fnParseFloat, src)
+			}
+			return f, err
+		}
+	}
+
+	var d decimal
+	if !d.set(src) {
+		return 0, syntaxError(fnParseFloat, src)
+	}
+	b, ovf := d.floatBits(&float32info)
+	f = math.Float32frombits(uint32(b))
+	if ovf {
+		err = rangeError(fnParseFloat, src)
+	}
+	return f, err
+}
+
+func Atof64(src []byte) (f float64, err error) {
+	if val, ok := special(src); ok {
+		return val, nil
+	}
+
+	// Parse mantissa and exponent.
+	mantissa, exp, neg, trunc, ok := readFloat(src)
+	if ok {
+		// Try pure floating-point arithmetic conversion.
+		if !trunc {
+			if f, ok := atof64exact(mantissa, exp, neg); ok {
+				return f, nil
+			}
+		}
+		// Try another fast path.
+		ext := new(extFloat)
+		if ok := ext.assignDecimal(mantissa, exp, neg, trunc, &float64info); ok {
+			b, ovf := ext.floatBits(&float64info)
+			f = math.Float64frombits(b)
+			if ovf {
+				err = rangeError(fnParseFloat, src)
+			}
+			return f, err
+		}
+	}
+
+	var d decimal
+	if !d.set(src) {
+		return 0, syntaxError(fnParseFloat, src)
+	}
+	b, ovf := d.floatBits(&float64info)
+	f = math.Float64frombits(b)
+	if ovf {
+		err = rangeError(fnParseFloat, src)
+	}
+	return f, err
+}
+
+func IntParse(src []byte) (i int64, err error) {
+	// Empty string bad.
+	if len(src) == 0 {
+		return 0, syntaxError(fnParseInt, []byte(src))
+	}
+
+	// Pick off leading sign.
+	s0 := src
+	neg := false
+	if src[0] == plus {
+		src = src[1:]
+	} else if src[0] == minus {
+		neg = true
+		src = src[1:]
+	}
+
+	// Convert unsigned and check range.
+	var un uint64
+	un, err = UintParse(src)
+	if err != nil && err.(*NumError).Err != ErrRange {
+		err.(*NumError).Func = fnParseInt
+		err.(*NumError).Num = string(s0)
+		return 0, err
+	}
+
+	cutoff := uint64(1 << uint(64-1))
+	if !neg && un >= cutoff {
+		return int64(cutoff - 1), rangeError(fnParseInt, []byte(s0))
+	}
+	if neg && un > cutoff {
+		return -int64(cutoff), rangeError(fnParseInt, []byte(s0))
+	}
+	n := int64(un)
+	if neg {
+		n = -n
+	}
+	return n, nil
+}
+
+func UintParse(src []byte) (uint64, error) {
+	if len(src) == 0 {
+		return 0, syntaxError(fnParseUint, []byte(src))
+	}
+
+	// Cutoff is the smallest number such that cutoff*10> maxUint64.
+	// Use compile-time constants for common cases.
+	cutoff := uint64(maxUint64/10 + 1)
+
+	var n uint64
+	for _, c := range []byte(src) {
+		var d byte
+		switch {
+		case zero <= c && c <= nine:
+			d = c - zero
+		case aChr <= c && c <= zChr:
+			d = c - aChr + 10
+		case bigAChr <= c && c <= bigZChr:
+			d = c - bigAChr + 10
+		default:
+			return 0, syntaxError(fnParseUint, src)
+		}
+
+		if d >= byte(10) {
+			return 0, syntaxError(fnParseUint, src)
+		}
+
+		if n >= cutoff {
+			// n*base overflows
+			return maxUint64, rangeError(fnParseUint, src)
+		}
+		n *= uint64(10)
+
+		n1 := n + uint64(d)
+		if n1 < n || n1 > maxUint64 {
+			// n+v overflows
+			return maxUint64, rangeError(fnParseUint, src)
+		}
+		n = n1
+	}
+
+	return n, nil
+}
+
+func FastNumber(item []byte) (uint64, bool) {
+	result := uint64(0)
+	hasMinus := false
+	leni := len(item) - 1
+	for idx := leni; idx >= 0; idx-- {
+		switch item[idx] {
+		case minus:
+			hasMinus = true
+		default:
+			// substract rune '0'
+			digit := item[idx] ^ 48
+			// no need to validate digit, because we were pre-validated to get here
+			result += uint64(digit) * uint64pow10[leni-idx]
+		}
+	}
+	return result, hasMinus
+}
+
+// FormatFloat converts the floating-point number f to a string,
+// according to the format fmt and precision prec. It rounds the
+// result assuming that the original was obtained from a floating-point
+// value of bitSize bits (32 for float32, 64 for float64).
+//
+// The format fmt is one of
+// 'b' (-ddddp±ddd, a binary exponent),
+// 'e' (-d.dddde±dd, a decimal exponent),
+// 'E' (-d.ddddE±dd, a decimal exponent),
+// 'f' (-ddd.dddd, no exponent),
+// 'g' ('e' for large exponents, 'f' otherwise), or
+// 'G' ('E' for large exponents, 'f' otherwise).
+//
+// The precision prec controls the number of digits
+// (excluding the exponent) printed by the 'e', 'E', 'f', 'g', and 'G' formats.
+// For 'e', 'E', and 'f' it is the number of digits after the decimal point.
+// For 'g' and 'G' it is the total number of digits.
+// The special precision -1 uses the smallest number of digits
+// necessary such that ParseFloat will return f exactly.
+func FormatFloat(src float64, bitSize int) string {
+	return string(genericFtoa(make([]byte, 0, max(3, 24)), src, gChr, bitSize))
+}
+
+// AppendFloat appends the string form of the floating-point number f,
+// as generated by FormatFloat, to dst and returns the extended buffer.
+func AppendFloat(dst []byte, src float64, fmt byte, bitSize int) []byte {
+	return genericFtoa(dst, src, fmt, bitSize)
+}
+
+// FormatUint returns the string representation of i in the given base,
+// for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
+// for digit values >= 10.
+func FormatUint(src uint64) string {
+	if src < nSmalls {
+		return small(int(src))
+	}
+	_, s := formatBits(nil, src, false, false)
+	return s
+}
+
+// FormatInt returns the string representation of i in the given base,
+// for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
+// for digit values >= 10.
+func FormatInt(src int64) string {
+	if 0 <= src && src < nSmalls {
+		return small(int(src))
+	}
+	_, s := formatBits(nil, uint64(src), src < 0, false)
+	return s
+}
+
+// AppendInt appends the string form of the integer i,
+// as generated by FormatInt, to dst and returns the extended buffer.
+func AppendInt(dst []byte, src int64) []byte {
+	if 0 <= src && src < nSmalls {
+		return append(dst, small(int(src))...)
+	}
+	dst, _ = formatBits(dst, uint64(src), src < 0, true)
+	return dst
+}
+
+// AppendUint appends the string form of the unsigned integer i,
+// as generated by FormatUint, to dst and returns the extended buffer.
+func AppendUint(dst []byte, src uint64) []byte {
+	if src < nSmalls {
+		return append(dst, small(int(src))...)
+	}
+	dst, _ = formatBits(dst, src, false, true)
+	return dst
+}
+
 func equalIgnoreCase(s1, s2 []byte) bool {
 	if len(s1) != len(s2) {
 		return false
@@ -324,27 +572,27 @@ func equalIgnoreCase(s1, s2 []byte) bool {
 	return true
 }
 
-func special(s []byte) (f float64, ok bool) {
-	if len(s) == 0 {
+func special(src []byte) (f float64, ok bool) {
+	if len(src) == 0 {
 		return
 	}
-	switch s[0] {
+	switch src[0] {
 	default:
 		return
 	case plus:
-		if equalIgnoreCase(s, plusInf) || equalIgnoreCase(s, plusInfinity) {
+		if equalIgnoreCase(src, plusInf) || equalIgnoreCase(src, plusInfinity) {
 			return math.Inf(1), true
 		}
 	case minus:
-		if equalIgnoreCase(s, minusInf) || equalIgnoreCase(s, minusInfinity) {
+		if equalIgnoreCase(src, minusInf) || equalIgnoreCase(src, minusInfinity) {
 			return math.Inf(-1), true
 		}
 	case nChr, bigNChr:
-		if equalIgnoreCase(s, NaN) {
+		if equalIgnoreCase(src, NaN) {
 			return math.NaN(), true
 		}
 	case iChr, bigIChr:
-		if equalIgnoreCase(s, inf) || equalIgnoreCase(s, infinity) {
+		if equalIgnoreCase(src, inf) || equalIgnoreCase(src, infinity) {
 			return math.Inf(1), true
 		}
 	}
@@ -353,18 +601,18 @@ func special(s []byte) (f float64, ok bool) {
 
 // readFloat reads a decimal mantissa and exponent from a float string representation.
 // It sets ok to false if the number could not fit return types or is invalid.
-func readFloat(s []byte) (mantissa uint64, exp int, neg, trunc, ok bool) {
+func readFloat(src []byte) (mantissa uint64, exp int, neg, trunc, ok bool) {
 	const uint64digits = 19
 	i := 0
 
 	// optional sign
-	if i >= len(s) {
+	if i >= len(src) {
 		return
 	}
 	switch {
-	case s[i] == plus:
+	case src[i] == plus:
 		i++
-	case s[i] == minus:
+	case src[i] == minus:
 		neg = true
 		i++
 	}
@@ -375,8 +623,8 @@ func readFloat(s []byte) (mantissa uint64, exp int, neg, trunc, ok bool) {
 	nd := 0
 	ndMant := 0
 	dp := 0
-	for ; i < len(s); i++ {
-		switch c := s[i]; true {
+	for ; i < len(src); i++ {
+		switch c := src[i]; true {
 		case c == period:
 			if sawdot {
 				return
@@ -396,7 +644,7 @@ func readFloat(s []byte) (mantissa uint64, exp int, neg, trunc, ok bool) {
 				mantissa *= 10
 				mantissa += uint64(c - zero)
 				ndMant++
-			} else if s[i] != zero {
+			} else if src[i] != zero {
 				trunc = true
 			}
 			continue
@@ -415,31 +663,31 @@ func readFloat(s []byte) (mantissa uint64, exp int, neg, trunc, ok bool) {
 	// just be sure to move the decimal point by
 	// a lot (say, 100000).  it doesn't matter if it's
 	// not the exact number.
-	if i < len(s) && (s[i] == eChr || s[i] == bigEChr) {
+	if i < len(src) && (src[i] == eChr || src[i] == bigEChr) {
 		i++
-		if i >= len(s) {
+		if i >= len(src) {
 			return
 		}
 		esign := 1
-		if s[i] == plus {
+		if src[i] == plus {
 			i++
-		} else if s[i] == minus {
+		} else if src[i] == minus {
 			i++
 			esign = -1
 		}
-		if i >= len(s) || s[i] < zero || s[i] > nine {
+		if i >= len(src) || src[i] < zero || src[i] > nine {
 			return
 		}
 		e := 0
-		for ; i < len(s) && zero <= s[i] && s[i] <= nine; i++ {
+		for ; i < len(src) && zero <= src[i] && src[i] <= nine; i++ {
 			if e < 10000 {
-				e = e*10 + int(s[i]) - int(zero)
+				e = e*10 + int(src[i]) - int(zero)
 			}
 		}
 		dp += e * esign
 	}
 
-	if i != len(s) {
+	if i != len(src) {
 		return
 	}
 
@@ -531,13 +779,6 @@ func rangeError(fn string, str []byte) *NumError {
 	return &NumError{fn, string(str), ErrRange}
 }
 
-func digitZero(dst []byte) int {
-	for i := range dst {
-		dst[i] = zero
-	}
-	return len(dst)
-}
-
 // Is the leading prefix of b lexicographically less than s?
 func prefixIsLessThan(b []byte, s string) bool {
 	for i := 0; i < len(s); i++ {
@@ -570,31 +811,31 @@ func shouldRoundUp(a *decimal, nd int) bool {
 // frexp10Many applies a common shift by a power of ten to a, b, c.
 func frexp10Many(a, b, c *extFloat) (exp10 int) {
 	exp10, i := c.frexp10()
-	a.Multiply(powersOfTen[i])
-	b.Multiply(powersOfTen[i])
+	a.multiply(powersOfTen[i])
+	b.multiply(powersOfTen[i])
 	return
 }
 
 func genericFtoa(dst []byte, val float64, fmt byte, bitSize int) []byte {
 	var bits uint64
-	var flt *floatInfo
+	var fltInf *floatInfo
 	switch bitSize {
 	case 32:
 		bits = uint64(math.Float32bits(float32(val)))
-		flt = &float32info
+		fltInf = &float32info
 	case 64:
 		bits = math.Float64bits(val)
-		flt = &float64info
+		fltInf = &float64info
 	default:
 		panic("strconv: illegal AppendFloat/FormatFloat bitSize")
 	}
 
-	neg := bits>>(flt.expbits+flt.mantbits) != 0
-	exp := int(bits>>flt.mantbits) & (1<<flt.expbits - 1)
-	mant := bits & (uint64(1)<<flt.mantbits - 1)
+	neg := bits>>(fltInf.expbits+fltInf.mantbits) != 0
+	exp := int(bits>>fltInf.mantbits) & (1<<fltInf.expbits - 1)
+	mant := bits & (uint64(1)<<fltInf.mantbits - 1)
 
 	switch exp {
-	case 1<<flt.expbits - 1:
+	case 1<<fltInf.expbits - 1:
 		// Inf, NaN
 		var s []byte
 		switch {
@@ -613,9 +854,9 @@ func genericFtoa(dst []byte, val float64, fmt byte, bitSize int) []byte {
 
 	default:
 		// add implicit top bit
-		mant |= uint64(1) << flt.mantbits
+		mant |= uint64(1) << fltInf.mantbits
 	}
-	exp += flt.bias
+	exp += fltInf.bias
 
 	var digs decimalSlice
 	ok := false
@@ -623,12 +864,12 @@ func genericFtoa(dst []byte, val float64, fmt byte, bitSize int) []byte {
 
 	// Try Grisu3 algorithm.
 	f := new(extFloat)
-	lower, upper := f.AssignComputeBounds(mant, exp, neg, flt)
+	lower, upper := f.assignComputeBounds(mant, exp, neg, fltInf)
 	var buf [32]byte
 	digs.d = buf[:]
-	ok = f.ShortestDecimal(&digs, &lower, &upper)
+	ok = f.shortestDecimal(&digs, &lower, &upper)
 	if !ok {
-		return bigFtoa(dst, -1, fmt, neg, mant, exp, flt)
+		return bigFtoa(dst, -1, fmt, neg, mant, exp, fltInf)
 	}
 
 	prec := -1
@@ -643,7 +884,7 @@ func genericFtoa(dst []byte, val float64, fmt byte, bitSize int) []byte {
 	}
 
 	if !ok {
-		return bigFtoa(dst, prec, fmt, neg, mant, exp, flt)
+		return bigFtoa(dst, prec, fmt, neg, mant, exp, fltInf)
 	}
 	return formatDigits(dst, neg, digs, prec, fmt)
 }
@@ -651,8 +892,8 @@ func genericFtoa(dst []byte, val float64, fmt byte, bitSize int) []byte {
 // bigFtoa uses multiprecision computations to format a float.
 func bigFtoa(dst []byte, prec int, fmt byte, neg bool, mant uint64, exp int, flt *floatInfo) []byte {
 	d := new(decimal)
-	d.Assign(mant)
-	d.Shift(exp - int(flt.mantbits))
+	d.assign(mant)
+	d.shift(exp - int(flt.mantbits))
 	var digs decimalSlice
 
 	d.roundShortest(mant, exp, flt)
@@ -895,254 +1136,6 @@ func formatBits(dst []byte, u uint64, neg, willAppend bool) (d []byte, s string)
 	return
 }
 
-func Atof32(s []byte) (f float32, err error) {
-	if val, ok := special(s); ok {
-		return float32(val), nil
-	}
-
-	// Parse mantissa and exponent.
-	mantissa, exp, neg, trunc, ok := readFloat(s)
-	if ok {
-		// Try pure floating-point arithmetic conversion.
-		if !trunc {
-			if f, ok := atof32exact(mantissa, exp, neg); ok {
-				return f, nil
-			}
-		}
-		// Try another fast path.
-		ext := new(extFloat)
-		if ok := ext.AssignDecimal(mantissa, exp, neg, trunc, &float32info); ok {
-			b, ovf := ext.floatBits(&float32info)
-			f = math.Float32frombits(uint32(b))
-			if ovf {
-				err = rangeError(fnParseFloat, s)
-			}
-			return f, err
-		}
-	}
-
-	var d decimal
-	if !d.set(s) {
-		return 0, syntaxError(fnParseFloat, s)
-	}
-	b, ovf := d.floatBits(&float32info)
-	f = math.Float32frombits(uint32(b))
-	if ovf {
-		err = rangeError(fnParseFloat, s)
-	}
-	return f, err
-}
-
-func Atof64(s []byte) (f float64, err error) {
-	if val, ok := special(s); ok {
-		return val, nil
-	}
-
-	// Parse mantissa and exponent.
-	mantissa, exp, neg, trunc, ok := readFloat(s)
-	if ok {
-		// Try pure floating-point arithmetic conversion.
-		if !trunc {
-			if f, ok := atof64exact(mantissa, exp, neg); ok {
-				return f, nil
-			}
-		}
-		// Try another fast path.
-		ext := new(extFloat)
-		if ok := ext.AssignDecimal(mantissa, exp, neg, trunc, &float64info); ok {
-			b, ovf := ext.floatBits(&float64info)
-			f = math.Float64frombits(b)
-			if ovf {
-				err = rangeError(fnParseFloat, s)
-			}
-			return f, err
-		}
-	}
-
-	var d decimal
-	if !d.set(s) {
-		return 0, syntaxError(fnParseFloat, s)
-	}
-	b, ovf := d.floatBits(&float64info)
-	f = math.Float64frombits(b)
-	if ovf {
-		err = rangeError(fnParseFloat, s)
-	}
-	return f, err
-}
-
-func IntParse(s []byte) (i int64, err error) {
-	// Empty string bad.
-	if len(s) == 0 {
-		return 0, syntaxError(fnParseInt, []byte(s))
-	}
-
-	// Pick off leading sign.
-	s0 := s
-	neg := false
-	if s[0] == plus {
-		s = s[1:]
-	} else if s[0] == minus {
-		neg = true
-		s = s[1:]
-	}
-
-	// Convert unsigned and check range.
-	var un uint64
-	un, err = UintParse(s)
-	if err != nil && err.(*NumError).Err != ErrRange {
-		err.(*NumError).Func = fnParseInt
-		err.(*NumError).Num = string(s0)
-		return 0, err
-	}
-
-	cutoff := uint64(1 << uint(64-1))
-	if !neg && un >= cutoff {
-		return int64(cutoff - 1), rangeError(fnParseInt, []byte(s0))
-	}
-	if neg && un > cutoff {
-		return -int64(cutoff), rangeError(fnParseInt, []byte(s0))
-	}
-	n := int64(un)
-	if neg {
-		n = -n
-	}
-	return n, nil
-}
-
-func UintParse(s []byte) (uint64, error) {
-	if len(s) == 0 {
-		return 0, syntaxError(fnParseUint, []byte(s))
-	}
-
-	// Cutoff is the smallest number such that cutoff*10> maxUint64.
-	// Use compile-time constants for common cases.
-	cutoff := uint64(maxUint64/10 + 1)
-
-	var n uint64
-	for _, c := range []byte(s) {
-		var d byte
-		switch {
-		case zero <= c && c <= nine:
-			d = c - zero
-		case aChr <= c && c <= zChr:
-			d = c - aChr + 10
-		case bigAChr <= c && c <= bigZChr:
-			d = c - bigAChr + 10
-		default:
-			return 0, syntaxError(fnParseUint, s)
-		}
-
-		if d >= byte(10) {
-			return 0, syntaxError(fnParseUint, s)
-		}
-
-		if n >= cutoff {
-			// n*base overflows
-			return maxUint64, rangeError(fnParseUint, s)
-		}
-		n *= uint64(10)
-
-		n1 := n + uint64(d)
-		if n1 < n || n1 > maxUint64 {
-			// n+v overflows
-			return maxUint64, rangeError(fnParseUint, s)
-		}
-		n = n1
-	}
-
-	return n, nil
-}
-
-func FastNumber(item []byte) (uint64, bool) {
-	result := uint64(0)
-	hasMinus := false
-	leni := len(item) - 1
-	for idx := leni; idx >= 0; idx-- {
-		switch item[idx] {
-		case minus:
-			hasMinus = true
-		default:
-			// substract rune '0'
-			digit := item[idx] ^ 48
-			// no need to validate digit, because we were pre-validated to get here
-			result += uint64(digit) * uint64pow10[leni-idx]
-		}
-	}
-	return result, hasMinus
-}
-
-// FormatFloat converts the floating-point number f to a string,
-// according to the format fmt and precision prec. It rounds the
-// result assuming that the original was obtained from a floating-point
-// value of bitSize bits (32 for float32, 64 for float64).
-//
-// The format fmt is one of
-// 'b' (-ddddp±ddd, a binary exponent),
-// 'e' (-d.dddde±dd, a decimal exponent),
-// 'E' (-d.ddddE±dd, a decimal exponent),
-// 'f' (-ddd.dddd, no exponent),
-// 'g' ('e' for large exponents, 'f' otherwise), or
-// 'G' ('E' for large exponents, 'f' otherwise).
-//
-// The precision prec controls the number of digits
-// (excluding the exponent) printed by the 'e', 'E', 'f', 'g', and 'G' formats.
-// For 'e', 'E', and 'f' it is the number of digits after the decimal point.
-// For 'g' and 'G' it is the total number of digits.
-// The special precision -1 uses the smallest number of digits
-// necessary such that ParseFloat will return f exactly.
-func FormatFloat(f float64, bitSize int) string {
-	return string(genericFtoa(make([]byte, 0, max(3, 24)), f, gChr, bitSize))
-}
-
-// AppendFloat appends the string form of the floating-point number f,
-// as generated by FormatFloat, to dst and returns the extended buffer.
-func AppendFloat(dst []byte, f float64, fmt byte, bitSize int) []byte {
-	return genericFtoa(dst, f, fmt, bitSize)
-}
-
-// FormatUint returns the string representation of i in the given base,
-// for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
-// for digit values >= 10.
-func FormatUint(i uint64) string {
-	if i < nSmalls {
-		return small(int(i))
-	}
-	_, s := formatBits(nil, i, false, false)
-	return s
-}
-
-// FormatInt returns the string representation of i in the given base,
-// for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
-// for digit values >= 10.
-func FormatInt(i int64) string {
-	if 0 <= i && i < nSmalls {
-		return small(int(i))
-	}
-	_, s := formatBits(nil, uint64(i), i < 0, false)
-	return s
-}
-
-// AppendInt appends the string form of the integer i,
-// as generated by FormatInt, to dst and returns the extended buffer.
-func AppendInt(dst []byte, i int64) []byte {
-	if 0 <= i && i < nSmalls {
-		return append(dst, small(int(i))...)
-	}
-	dst, _ = formatBits(dst, uint64(i), i < 0, true)
-	return dst
-}
-
-// AppendUint appends the string form of the unsigned integer i,
-// as generated by FormatUint, to dst and returns the extended buffer.
-func AppendUint(dst []byte, i uint64) []byte {
-	if i < nSmalls {
-		return append(dst, small(int(i))...)
-	}
-	dst, _ = formatBits(dst, i, false, true)
-	return dst
-}
-
 // trim trailing zeros from number.
 // (They are meaningless; the decimal point is tracked
 // independent of the number of digits.)
@@ -1378,7 +1371,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 		} else {
 			n = powTab[d.dp]
 		}
-		d.Shift(-n)
+		d.shift(-n)
 		exp += n
 	}
 	for d.dp < 0 || d.dp == 0 && d.d[0] < five {
@@ -1388,7 +1381,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 		} else {
 			n = powTab[-d.dp]
 		}
-		d.Shift(n)
+		d.shift(n)
 		exp -= n
 	}
 
@@ -1400,7 +1393,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 	// adjust d accordingly.
 	if exp < flt.bias+1 {
 		n := flt.bias + 1 - exp
-		d.Shift(-n)
+		d.shift(-n)
 		exp += n
 	}
 
@@ -1409,8 +1402,8 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 	}
 
 	// Extract 1+flt.mantbits bits.
-	d.Shift(int(1 + flt.mantbits))
-	mant = d.RoundedInteger()
+	d.shift(int(1 + flt.mantbits))
+	mant = d.roundedInteger()
 
 	// Rounding might have added a bit; shift down.
 	if mant == 2<<flt.mantbits {
@@ -1443,47 +1436,8 @@ out:
 	return bits, overflow
 }
 
-func (d *decimal) String() string {
-	n := 10 + d.nd
-	if d.dp > 0 {
-		n += d.dp
-	}
-	if d.dp < 0 {
-		n += -d.dp
-	}
-
-	buf := make([]byte, n)
-	w := 0
-	switch {
-	case d.nd == 0:
-		return "0"
-
-	case d.dp <= 0:
-		// zeros fill space between decimal point and digits
-		buf[w] = zero
-		w++
-		buf[w] = period
-		w++
-		w += digitZero(buf[w : w+-d.dp])
-		w += copy(buf[w:], d.d[0:d.nd])
-
-	case d.dp < d.nd:
-		// decimal point in middle of digits
-		w += copy(buf[w:], d.d[0:d.dp])
-		buf[w] = period
-		w++
-		w += copy(buf[w:], d.d[d.dp:d.nd])
-
-	default:
-		// zeros fill space between digits and decimal point
-		w += copy(buf[w:], d.d[0:d.nd])
-		w += digitZero(buf[w : w+d.dp-d.nd])
-	}
-	return string(buf[0:w])
-}
-
 // Assign v to a.
-func (d *decimal) Assign(v uint64) {
+func (d *decimal) assign(v uint64) {
 	var buf [24]byte
 
 	// Write reversed decimal in buf.
@@ -1507,7 +1461,7 @@ func (d *decimal) Assign(v uint64) {
 }
 
 // Binary shift left (k > 0) or right (k < 0).
-func (d *decimal) Shift(k int) {
+func (d *decimal) shift(k int) {
 	switch {
 	case d.nd == 0:
 		// nothing to do: d == 0
@@ -1530,19 +1484,19 @@ func (d *decimal) Shift(k int) {
 // If nd is zero, it means we're rounding
 // just to the left of the digits, as in
 // 0.09 -> 0.1.
-func (d *decimal) Round(nd int) {
+func (d *decimal) round(nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
 	if shouldRoundUp(d, nd) {
-		d.RoundUp(nd)
+		d.roundUp(nd)
 	} else {
-		d.RoundDown(nd)
+		d.roundDown(nd)
 	}
 }
 
 // Round a down to nd digits (or fewer).
-func (d *decimal) RoundDown(nd int) {
+func (d *decimal) roundDown(nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
@@ -1551,7 +1505,7 @@ func (d *decimal) RoundDown(nd int) {
 }
 
 // Round a up to nd digits (or fewer).
-func (d *decimal) RoundUp(nd int) {
+func (d *decimal) roundUp(nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
@@ -1575,7 +1529,7 @@ func (d *decimal) RoundUp(nd int) {
 
 // Extract integer part, rounded appropriately.
 // No guarantees about overflow.
-func (d *decimal) RoundedInteger() uint64 {
+func (d *decimal) roundedInteger() uint64 {
 	if d.dp > 20 {
 		return 0xFFFFFFFFFFFFFFFF
 	}
@@ -1626,8 +1580,8 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 	// Next highest floating point number is mant+1 << exp-mantbits.
 	// Our upper bound is halfway between, mant*2+1 << exp-mantbits-1.
 	upper := new(decimal)
-	upper.Assign(mant*2 + 1)
-	upper.Shift(exp - int(flt.mantbits) - 1)
+	upper.assign(mant*2 + 1)
+	upper.shift(exp - int(flt.mantbits) - 1)
 
 	// d = mant << (exp - mantbits)
 	// Next lowest floating point number is mant-1 << exp-mantbits,
@@ -1645,8 +1599,8 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 		explo = exp - 1
 	}
 	lower := new(decimal)
-	lower.Assign(mantlo*2 + 1)
-	lower.Shift(explo - int(flt.mantbits) - 1)
+	lower.assign(mantlo*2 + 1)
+	lower.shift(explo - int(flt.mantbits) - 1)
 
 	// The upper and lower bounds are possible outputs only if
 	// the original mantissa is even, so that IEEE round-to-even
@@ -1679,13 +1633,13 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 		// If it's okay to do only one, do it.
 		switch {
 		case okdown && okup:
-			d.Round(i + 1)
+			d.round(i + 1)
 			return
 		case okdown:
-			d.RoundDown(i + 1)
+			d.roundDown(i + 1)
 			return
 		case okup:
-			d.RoundUp(i + 1)
+			d.roundUp(i + 1)
 			return
 		}
 	}
@@ -1768,7 +1722,7 @@ func (e *NumError) Error() string {
 // the extFloat passed as receiver. Overflow is set to true if
 // the resulting float64 is ±Inf.
 func (f *extFloat) floatBits(flt *floatInfo) (bits uint64, overflow bool) {
-	f.Normalize()
+	f.normalize()
 
 	exp := f.exp + 63
 
@@ -1815,7 +1769,7 @@ func (f *extFloat) floatBits(flt *floatInfo) (bits uint64, overflow bool) {
 // defined by mant, exp and precision given by flt. It returns
 // lower, upper such that any number in the closed interval
 // [lower, upper] is converted back to the same floating point number.
-func (f *extFloat) AssignComputeBounds(mant uint64, exp int, neg bool, flt *floatInfo) (lower, upper extFloat) {
+func (f *extFloat) assignComputeBounds(mant uint64, exp int, neg bool, flt *floatInfo) (lower, upper extFloat) {
 	f.mant = mant
 	f.exp = exp - int(flt.mantbits)
 	f.neg = neg
@@ -1838,7 +1792,7 @@ func (f *extFloat) AssignComputeBounds(mant uint64, exp int, neg bool, flt *floa
 
 // Normalize normalizes f so that the highest bit of the mantissa is
 // set, and returns the number by which the mantissa was left-shifted.
-func (f *extFloat) Normalize() (shift uint) {
+func (f *extFloat) normalize() (shift uint) {
 	mant, exp := f.mant, f.exp
 	if mant == 0 {
 		return 0
@@ -1874,7 +1828,7 @@ func (f *extFloat) Normalize() (shift uint) {
 
 // Multiply sets f to the product f*g: the result is correctly rounded,
 // but not normalized.
-func (f *extFloat) Multiply(g extFloat) {
+func (f *extFloat) multiply(g extFloat) {
 	fhi, flo := f.mant>>32, uint64(uint32(f.mant))
 	ghi, glo := g.mant>>32, uint64(uint32(g.mant))
 
@@ -1896,7 +1850,7 @@ func (f *extFloat) Multiply(g extFloat) {
 // reports whether the value represented by f is guaranteed to be the
 // best approximation of d after being rounded to a float64 or
 // float32 depending on flt.
-func (f *extFloat) AssignDecimal(mantissa uint64, exp10 int, neg bool, trunc bool, flt *floatInfo) (ok bool) {
+func (f *extFloat) assignDecimal(mantissa uint64, exp10 int, neg bool, trunc bool, flt *floatInfo) (ok bool) {
 	const uint64digits = 19
 	const errorscale = 8
 	errors := 0 // An upper bound for error, computed in errorscale*ulp.
@@ -1920,22 +1874,22 @@ func (f *extFloat) AssignDecimal(mantissa uint64, exp10 int, neg bool, trunc boo
 	if adjExp < uint64digits && mantissa < uint64pow10[uint64digits-adjExp] {
 		// We can multiply the mantissa exactly.
 		f.mant *= uint64pow10[adjExp]
-		f.Normalize()
+		f.normalize()
 	} else {
-		f.Normalize()
-		f.Multiply(smallPowersOfTen[adjExp])
+		f.normalize()
+		f.multiply(smallPowersOfTen[adjExp])
 		errors += errorscale / 2
 	}
 
 	// We multiply by 10 to the exp - exp%step.
-	f.Multiply(powersOfTen[i])
+	f.multiply(powersOfTen[i])
 	if errors > 0 {
 		errors += 1
 	}
 	errors += errorscale / 2
 
 	// Normalize
-	shift := f.Normalize()
+	shift := f.normalize()
 	errors <<= shift
 
 	// Now f is a good approximation of the decimal.
@@ -1996,129 +1950,16 @@ Loop:
 	}
 	// Apply the desired decimal shift on f. It will have exponent
 	// in the desired range. This is multiplication by 10^-exp10.
-	f.Multiply(powersOfTen[i])
+	f.multiply(powersOfTen[i])
 
 	return -(firstPowerOfTen + i*stepPowerOfTen), i
-}
-
-// FixedDecimal stores in d the first n significant digits
-// of the decimal representation of f. It returns false
-// if it cannot be sure of the answer.
-func (f *extFloat) FixedDecimal(d *decimalSlice, n int) bool {
-	if f.mant == 0 {
-		d.nd = 0
-		d.dp = 0
-		d.neg = f.neg
-		return true
-	}
-	if n == 0 {
-		panic("strconv: internal error: extFloat.FixedDecimal called with n == 0")
-	}
-	// Multiply by an appropriate power of ten to have a reasonable
-	// number to process.
-	f.Normalize()
-	exp10, _ := f.frexp10()
-
-	shift := uint(-f.exp)
-	integer := uint32(f.mant >> shift)
-	fraction := f.mant - (uint64(integer) << shift)
-	ε := uint64(1) // ε is the uncertainty we have on the mantissa of f.
-
-	// Write exactly n digits to d.
-	needed := n        // how many digits are left to write.
-	integerDigits := 0 // the number of decimal digits of integer.
-	pow10 := uint64(1) // the power of ten by which f was scaled.
-	for i, pow := 0, uint64(1); i < 20; i++ {
-		if pow > uint64(integer) {
-			integerDigits = i
-			break
-		}
-		pow *= 10
-	}
-	rest := integer
-	if integerDigits > needed {
-		// the integral part is already large, trim the last digits.
-		pow10 = uint64pow10[integerDigits-needed]
-		integer /= uint32(pow10)
-		rest -= integer * uint32(pow10)
-	} else {
-		rest = 0
-	}
-
-	// Write the digits of integer: the digits of rest are omitted.
-	var buf [32]byte
-	pos := len(buf)
-	for v := integer; v > 0; {
-		v1 := v / 10
-		v -= 10 * v1
-		pos--
-		buf[pos] = byte(v + uint32(zero))
-		v = v1
-	}
-	for i := pos; i < len(buf); i++ {
-		d.d[i-pos] = buf[i]
-	}
-	nd := len(buf) - pos
-	d.nd = nd
-	d.dp = integerDigits + exp10
-	needed -= nd
-
-	if needed > 0 {
-		if rest != 0 || pow10 != 1 {
-			panic("strconv: internal error, rest != 0 but needed > 0")
-		}
-		// Emit digits for the fractional part. Each time, 10*fraction
-		// fits in a uint64 without overflow.
-		for needed > 0 {
-			fraction *= 10
-			ε *= 10 // the uncertainty scales as we multiply by ten.
-			if 2*ε > 1<<shift {
-				// the error is so large it could modify which digit to write, abort.
-				return false
-			}
-			digit := fraction >> shift
-			d.d[nd] = byte(digit + uint64(zero))
-			fraction -= digit << shift
-			nd++
-			needed--
-		}
-		d.nd = nd
-	}
-
-	// We have written a truncation of f (a numerator / 10^d.dp). The remaining part
-	// can be interpreted as a small number (< 1) to be added to the last digit of the
-	// numerator.
-	//
-	// If rest > 0, the amount is:
-	//    (rest<<shift | fraction) / (pow10 << shift)
-	//    fraction being known with a ±ε uncertainty.
-	//    The fact that n > 0 guarantees that pow10 << shift does not overflow a uint64.
-	//
-	// If rest = 0, pow10 == 1 and the amount is
-	//    fraction / (1 << shift)
-	//    fraction being known with a ±ε uncertainty.
-	//
-	// We pass this information to the rounding routine for adjustment.
-
-	ok := d.adjustLastDigitFixed(uint64(rest)<<shift|fraction, pow10, shift, ε)
-	if !ok {
-		return false
-	}
-	// Trim trailing zeros.
-	for i := d.nd - 1; i >= 0; i-- {
-		if d.d[i] != zero {
-			d.nd = i + 1
-			break
-		}
-	}
-	return true
 }
 
 // ShortestDecimal stores in d the shortest decimal representation of f
 // which belongs to the open interval (lower, upper), where f is supposed
 // to lie. It returns false whenever the result is unsure. The implementation
 // uses the Grisu3 algorithm.
-func (f *extFloat) ShortestDecimal(d *decimalSlice, lower, upper *extFloat) bool {
+func (f *extFloat) shortestDecimal(d *decimalSlice, lower, upper *extFloat) bool {
 	if f.mant == 0 {
 		d.nd = 0
 		d.dp = 0
@@ -2150,7 +1991,7 @@ func (f *extFloat) ShortestDecimal(d *decimalSlice, lower, upper *extFloat) bool
 		d.neg = f.neg
 		return true
 	}
-	upper.Normalize()
+	upper.normalize()
 	// Uniformize exponents.
 	if f.exp > upper.exp {
 		f.mant <<= uint(f.exp - upper.exp)

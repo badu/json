@@ -297,8 +297,7 @@ func (e *encodeState) Float(value float64, bitSize int) {
 	// Convert as if by ES6 number to string conversion.
 	// This matches most other JSON generators.
 	// See golang.org/issue/6384 and golang.org/issue/14135.
-	// Like fmt %g, but the exponent cutoffs are different
-	// and exponents themselves are not padded to two digits.
+	// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
 	b := e.scratch[:0]
 	abs := math.Abs(value)
 	fmt := fChr
@@ -389,15 +388,15 @@ func (e *encodeState) ArrayEnd() {
 	e.WriteByte(squareClose)
 }
 
-// marshalerFieldCache is like unmarshalerFields but uses a cache to avoid repeated work.
-func (e *encodeState) StructStart(value reflect.Value) []MarshalField {
+// marshalerFieldCache is like getUnmarshalFields but uses a cache to avoid repeated work.
+func (e *encodeState) StructStart(value reflect.Value) marshalFields {
 	e.WriteByte(curlOpen)
 	return e.ReadFields(value)
 }
 
-func (e *encodeState) ReadFields(value reflect.Value) []MarshalField {
+func (e *encodeState) ReadFields(value reflect.Value) marshalFields {
 
-	cachedFields, _ := marshalerFieldCache.value.Load().(map[reflect.Type][]MarshalField)
+	cachedFields, _ := marshalerFieldCache.value.Load().(map[reflect.Type]marshalFields)
 	fields := cachedFields[value.Type()]
 	if fields != nil {
 		return fields
@@ -405,15 +404,15 @@ func (e *encodeState) ReadFields(value reflect.Value) []MarshalField {
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
-	fields = marshalFields(value.Type())
+	fields = getMarshalFields(value.Type())
 	if fields == nil {
-		return []MarshalField{}
+		return marshalFields{}
 	}
 
 	marshalerFieldCache.mu.Lock()
-	cachedFields, _ = marshalerFieldCache.value.Load().(map[reflect.Type][]MarshalField)
+	cachedFields, _ = marshalerFieldCache.value.Load().(map[reflect.Type]marshalFields)
 
-	newFieldsMap := make(map[reflect.Type][]MarshalField, len(cachedFields)+1)
+	newFieldsMap := make(map[reflect.Type]marshalFields, len(cachedFields)+1)
 
 	for typeKey, fieldsValues := range cachedFields {
 		newFieldsMap[typeKey] = fieldsValues

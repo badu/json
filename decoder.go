@@ -195,7 +195,7 @@ func (d *Decoder) Token() (Token, error) {
 			d.scanp++
 			d.tokenStack = append(d.tokenStack, d.tokenState)
 			d.tokenState = tokenArrayStart
-			return Delim(squareOpen), nil
+			return squareOpen, nil
 
 		case squareClose:
 			if d.tokenState != tokenArrayStart && d.tokenState != tokenArrayComma {
@@ -205,7 +205,7 @@ func (d *Decoder) Token() (Token, error) {
 			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
 			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
 			d.tokenValueEnd()
-			return Delim(squareClose), nil
+			return squareClose, nil
 
 		case curlOpen:
 			if !d.tokenValueAllowed() {
@@ -214,7 +214,7 @@ func (d *Decoder) Token() (Token, error) {
 			d.scanp++
 			d.tokenStack = append(d.tokenStack, d.tokenState)
 			d.tokenState = tokenObjectStart
-			return Delim(curlOpen), nil
+			return curlOpen, nil
 
 		case curlClose:
 			if d.tokenState != tokenObjectStart && d.tokenState != tokenObjectComma {
@@ -224,7 +224,7 @@ func (d *Decoder) Token() (Token, error) {
 			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
 			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
 			d.tokenValueEnd()
-			return Delim(curlClose), nil
+			return curlClose, nil
 
 		case colon:
 			if d.tokenState != tokenObjectColon {

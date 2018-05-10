@@ -247,12 +247,12 @@ func isValidTag(tag string) bool {
 	return true
 }
 
-// marshalFields returns a list of fields that JSON should recognize for the given type.
+// getMarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func marshalFields(typ reflect.Type) []MarshalField {
+func getMarshalFields(typ reflect.Type) marshalFields {
 	// Embedded fields to explore at the current level and the next.
-	fields := []MarshalField{}
-	next := []MarshalField{{Type: typ}}
+	fields := marshalFields{}
+	next := marshalFields{{Type: typ}}
 
 	// Count of queued names for current level and the next.
 	count := map[reflect.Type]int{}
@@ -262,7 +262,7 @@ func marshalFields(typ reflect.Type) []MarshalField {
 	visited := map[reflect.Type]bool{}
 
 	// Fields found.
-	var result []MarshalField
+	var result marshalFields
 
 	//println("Start.")
 	for len(next) > 0 {
@@ -380,7 +380,7 @@ func marshalFields(typ reflect.Type) []MarshalField {
 		if x[i].tag != x[j].tag {
 			return x[i].tag
 		}
-		return marshalByIndex(x).Less(i, j)
+		return marshalFields(x).Less(i, j)
 	})
 
 	// Delete all fields that are hidden by the Go rules for embedded fields, except that fields with JSON tags are promoted.
@@ -408,12 +408,12 @@ func marshalFields(typ reflect.Type) []MarshalField {
 	}
 
 	result = out
-	sort.Sort(marshalByIndex(result))
+	sort.Sort(marshalFields(result))
 
 	return result
 }
 
-func dominantMarshalField(fields []MarshalField) (MarshalField, bool) {
+func dominantMarshalField(fields marshalFields) (MarshalField, bool) {
 	// The fields are sorted in increasing index-length order. The winner must therefore be one with the shortest index length. Drop all longer entries, which is easy: just truncate the slice.
 	length := len(fields[0].indexes)
 	tagged := -1 // Index of first tagged field.
@@ -440,12 +440,12 @@ func dominantMarshalField(fields []MarshalField) (MarshalField, bool) {
 	return fields[0], true
 }
 
-// unmarshalerFields returns a list of fields that JSON should recognize for the given type.
+// getUnmarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func unmarshalerFields(value reflect.Value) []field {
+func getUnmarshalFields(value reflect.Value) unmarshalFields {
 	// Embedded fields to explore at the current level and the next.
-	fields := []field{}
-	next := []field{{Type: value.Type()}}
+	fields := unmarshalFields{}
+	next := unmarshalFields{{Type: value.Type()}}
 
 	// Count of queued names for current level and the next.
 	count := map[reflect.Type]int{}
@@ -455,9 +455,8 @@ func unmarshalerFields(value reflect.Value) []field {
 	visited := map[reflect.Type]bool{}
 
 	// Fields found.
-	var result []field
+	var result unmarshalFields
 
-	//println("Start.")
 	for len(next) > 0 {
 		fields, next = next, fields[:0]
 		count, nextCount = nextCount, map[reflect.Type]int{}
@@ -530,18 +529,14 @@ func unmarshalerFields(value reflect.Value) []field {
 					if len(name) == 0 {
 						name = structField.Name
 					}
-					/**
-					if len(indexes) > 1 {
-						println("Yes, " + name + " has " + FormatInt(int64(len(indexes))) + " indexes.")
-					}
-					**/
-					f := field{
-						name:     name,
-						tag:      tagged,
-						indexes:  indexes,
-						Type:     fieldType,
-						willOmit: opts.Contains(omitTagOption),
-						isBasic:  isBasic,
+
+					f := UnmarshalField{
+						name:    name,
+						tag:     tagged,
+						indexes: indexes,
+						Type:    fieldType,
+						//willOmit: opts.Contains(omitTagOption),
+						isBasic: isBasic,
 					}
 					f.nameBytes = []byte(f.name)
 					f.equalFold = foldFunc(f.nameBytes)
@@ -559,7 +554,7 @@ func unmarshalerFields(value reflect.Value) []field {
 				nextCount[fieldType]++
 				if nextCount[fieldType] == 1 {
 					//println("Recording.")
-					f := field{name: fieldType.Name(), indexes: indexes, Type: fieldType}
+					f := UnmarshalField{name: fieldType.Name(), indexes: indexes, Type: fieldType}
 					f.nameBytes = []byte(f.name)
 					f.equalFold = foldFunc(f.nameBytes)
 
@@ -568,8 +563,7 @@ func unmarshalerFields(value reflect.Value) []field {
 			}
 		}
 	}
-	//println("Finished.")
-	//TODO : remove sort - makes no sense
+
 	sort.Slice(result, func(i, j int) bool {
 		x := result
 		// sort field by name, breaking ties with depth, then breaking ties with "name came from json tag", then breaking ties with index sequence.
@@ -582,7 +576,7 @@ func unmarshalerFields(value reflect.Value) []field {
 		if x[i].tag != x[j].tag {
 			return x[i].tag
 		}
-		return byIndex(x).Less(i, j)
+		return unmarshalFields(x).Less(i, j)
 	})
 
 	// Delete all fields that are hidden by the Go rules for embedded fields, except that fields with JSON tags are promoted.
@@ -610,14 +604,14 @@ func unmarshalerFields(value reflect.Value) []field {
 	}
 
 	result = out
-	sort.Sort(byIndex(result))
+	sort.Sort(unmarshalFields(result))
 
 	return result
 }
 
 // dominantField looks through the fields, all of which are known to have the same name, to find the single field that dominates the others using Go's embedding rules, modified by the presence of JSON tags.
 // If there are multiple top-level fields, the boolean will be false: This condition is an error in Go and we skip all the fields.
-func dominantField(fields []field) (field, bool) {
+func dominantField(fields unmarshalFields) (UnmarshalField, bool) {
 	// The fields are sorted in increasing index-length order. The winner
 	// must therefore be one with the shortest index length. Drop all
 	// longer entries, which is easy: just truncate the slice.
@@ -632,7 +626,7 @@ func dominantField(fields []field) (field, bool) {
 			if tagged >= 0 {
 				// Multiple tagged fields at the same level: conflict.
 				// Return no field.
-				return field{}, false
+				return UnmarshalField{}, false
 			}
 			tagged = i
 		}
@@ -644,7 +638,7 @@ func dominantField(fields []field) (field, bool) {
 	// we have a conflict (two fields named "X" at the same level) and we
 	// return no field.
 	if len(fields) > 1 {
-		return field{}, false
+		return UnmarshalField{}, false
 	}
 	return fields[0], true
 }

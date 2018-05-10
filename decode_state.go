@@ -388,22 +388,23 @@ func (d *decodeState) doMap(walker *SetWalker) {
 		}
 	}
 }
-func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *field {
-	var result *field
+func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *UnmarshalField {
+	var result *UnmarshalField
 
-	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
+	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[reflect.Type]unmarshalFields)
 	fields := cachedFields[value.Type()]
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = unmarshalerFields(value)
+		fields = getUnmarshalFields(value)
 		if fields == nil {
-			fields = []field{}
+			//fields = unmarshalFields{}
+			return result
 		}
 
 		unmarshalerFieldCache.mu.Lock()
-		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[reflect.Type][]field)
-		newFieldsMap := make(map[reflect.Type][]field, len(cachedFields)+1)
+		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[reflect.Type]unmarshalFields)
+		newFieldsMap := make(map[reflect.Type]unmarshalFields, len(cachedFields)+1)
 		for k, v := range cachedFields {
 			newFieldsMap[k] = v
 		}

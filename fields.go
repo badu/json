@@ -6,11 +6,11 @@
 
 package json
 
-func (x byIndex) Len() int { return len(x) }
+func (x unmarshalFields) Len() int { return len(x) }
 
-func (x byIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
+func (x unmarshalFields) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
-func (x byIndex) Less(i, j int) bool {
+func (x unmarshalFields) Less(i, j int) bool {
 	for k, xik := range x[i].indexes {
 		if k >= len(x[j].indexes) {
 			return false
@@ -22,11 +22,11 @@ func (x byIndex) Less(i, j int) bool {
 	return len(x[i].indexes) < len(x[j].indexes)
 }
 
-func (x marshalByIndex) Len() int { return len(x) }
+func (x marshalFields) Len() int { return len(x) }
 
-func (x marshalByIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
+func (x marshalFields) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
-func (x marshalByIndex) Less(i, j int) bool {
+func (x marshalFields) Less(i, j int) bool {
 	for k, xik := range x[i].indexes {
 		if k >= len(x[j].indexes) {
 			return false
