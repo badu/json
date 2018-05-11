@@ -6,7 +6,10 @@
 
 package json
 
-import "strings"
+import (
+	"bytes"
+	"strings"
+)
 
 // Contains reports whether a comma-separated list of options
 // contains a particular substr flag. substr must be surrounded by a
@@ -23,6 +26,26 @@ func (o tagOptions) Contains(optionName string) bool {
 			s, next = s[:i], s[i+1:]
 		}
 		if s == optionName {
+			return true
+		}
+		s = next
+	}
+	return false
+}
+
+func (o tagOptionsByte) Contains(optionName []byte) bool {
+	if len(o) == 0 {
+		return false
+	}
+
+	s := o
+	for len(s) > 0 {
+		var next []byte
+		i := bytes.IndexByte(s, comma)
+		if i >= 0 {
+			s, next = s[:i], s[i+1:]
+		}
+		if bytes.Equal(s, optionName) {
 			return true
 		}
 		s = next

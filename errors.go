@@ -29,7 +29,7 @@ func (e *UnmarshalTypeError) Error() string {
 }
 
 func (e *UnsupportedTypeError) Error() string {
-	return "json: unsupported type: " + e.Type.String()
+	return "json: unsupported type: " + e.Type.Name()
 }
 
 func (e *UnsupportedValueError) Error() string {
@@ -39,5 +39,5 @@ func (e *UnsupportedValueError) Error() string {
 func (e *SyntaxError) Error() string { return e.msg }
 
 func (e *MarshalerError) Error() string {
-	return "json: error calling MarshalJSON for type " + e.Type.String() + ": " + e.Err.Error()
+	return "json: error calling MarshalJSON for type " + e.Type.Name() + ": " + e.Err.Error()
 }

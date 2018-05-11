@@ -9,6 +9,7 @@ package json
 import (
 	"errors"
 	"math"
+	"unicode/utf8"
 )
 
 const (
@@ -304,6 +305,224 @@ var (
 	float64info = floatInfo{52, 11, -1023}
 )
 
+// contains reports whether the string contains the byte c.
+func contains(s []byte, c byte) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return true
+		}
+	}
+	return false
+}
+
+func unhex(b byte) (v rune, ok bool) {
+	c := rune(b)
+	switch {
+	case rune(zero) <= c && c <= rune(nine):
+		return c - rune(zero), true
+	case rune(aChr) <= c && c <= rune(fChr):
+		return c - rune(aChr) + 10, true
+	case rune(bigAChr) <= c && c <= rune(bigFChr):
+		return c - rune(bigAChr) + 10, true
+	}
+	return
+}
+
+// UnquoteChar decodes the first character or byte in the escaped string
+// or character literal represented by the string s.
+// It returns four values:
+//
+//	1) value, the decoded Unicode code point or byte value;
+//	2) multibyte, a boolean indicating whether the decoded character requires a multibyte UTF-8 representation;
+//	3) tail, the remainder of the string after the character; and
+//	4) an error that will be nil if the character is syntactically valid.
+//
+// The second argument, quote, specifies the type of literal being parsed
+// and therefore which escaped quote character is permitted.
+// If set to a single quote, it permits the sequence \' and disallows unescaped '.
+// If set to a double quote, it permits \" and disallows unescaped ".
+// If set to zero, it does not permit either escape and allows both quote characters to appear unescaped.
+func UnquoteChar(s []byte, quoter byte) (value rune, multibyte bool, tail []byte, err error) {
+	// easy cases
+	switch c := s[0]; {
+	case c == quoter && (quoter == sQuote || quoter == quote):
+		err = ErrSyntax
+		return
+	case c >= utf8.RuneSelf:
+		r, size := utf8.DecodeRune(s)
+		return r, true, s[size:], nil
+	case c != backSlash:
+		return rune(s[0]), false, s[1:], nil
+	}
+
+	// hard case: c is backslash
+	if len(s) <= 1 {
+		err = ErrSyntax
+		return
+	}
+	c := s[1]
+	s = s[2:]
+
+	switch c {
+	case aChr:
+		value = '\a'
+	case 'b':
+		value = '\b'
+	case fChr:
+		value = '\f'
+	case nChr:
+		value = rune(newLine)
+	case 'r':
+		value = rune(retChar)
+	case 't':
+		value = '\t'
+	case 'v':
+		value = '\v'
+	case 'x', 'u', 'U':
+		n := 0
+		switch c {
+		case 'x':
+			n = 2
+		case 'u':
+			n = 4
+		case 'U':
+			n = 8
+		}
+		var v rune
+		if len(s) < n {
+			err = ErrSyntax
+			return
+		}
+		for j := 0; j < n; j++ {
+			x, ok := unhex(s[j])
+			if !ok {
+				err = ErrSyntax
+				return
+			}
+			v = v<<4 | x
+		}
+		s = s[n:]
+		if c == 'x' {
+			// single-byte string, possibly not UTF-8
+			value = v
+			break
+		}
+		if v > utf8.MaxRune {
+			err = ErrSyntax
+			return
+		}
+		value = v
+		multibyte = true
+	case zero, one, two, three, four, five, six, seven:
+		v := rune(c) - rune(zero)
+		if len(s) < 2 {
+			err = ErrSyntax
+			return
+		}
+		for j := 0; j < 2; j++ { // one digit already; two more
+			x := rune(s[j]) - rune(zero)
+			if x < 0 || x > 7 {
+				err = ErrSyntax
+				return
+			}
+			v = (v << 3) | x
+		}
+		s = s[2:]
+		if v > 255 {
+			err = ErrSyntax
+			return
+		}
+		value = v
+	case backSlash:
+		value = rune(backSlash)
+	case sQuote, quote:
+		if c != quoter {
+			err = ErrSyntax
+			return
+		}
+		value = rune(c)
+	default:
+		err = ErrSyntax
+		return
+	}
+	tail = s
+	return
+}
+
+// Unquote interprets s as a single-quoted, double-quoted,
+// or backquoted Go string literal, returning the string value
+// that s quotes.  (If s is single-quoted, it would be a Go
+// character literal; Unquote returns the corresponding
+// one-character string.)
+func Unquote(s []byte) ([]byte, error) {
+	n := len(s)
+	if n < 2 {
+		return []byte{}, ErrSyntax
+	}
+	quoter := s[0]
+	if quoter != s[n-1] {
+		return []byte{}, ErrSyntax
+	}
+	s = s[1 : n-1]
+
+	if quoter == '`' {
+		if contains(s, '`') {
+			return []byte{}, ErrSyntax
+		}
+		if contains(s, retChar) {
+			// -1 because we know there is at least one \r to remove.
+			buf := make([]byte, 0, len(s)-1)
+			for i := 0; i < len(s); i++ {
+				if s[i] != retChar {
+					buf = append(buf, s[i])
+				}
+			}
+			return buf, nil
+		}
+		return s, nil
+	}
+	if quoter != quote && quoter != sQuote {
+		return []byte{}, ErrSyntax
+	}
+	if contains(s, newLine) {
+		return []byte{}, ErrSyntax
+	}
+
+	// Is it trivial? Avoid allocation.
+	if !contains(s, backSlash) && !contains(s, quoter) {
+		switch quoter {
+		case quote:
+			return s, nil
+		case sQuote:
+			r, size := utf8.DecodeRune(s)
+			if size == len(s) && (r != utf8.RuneError || size != 1) {
+				return s, nil
+			}
+		}
+	}
+
+	var runeTmp [utf8.UTFMax]byte
+	buf := make([]byte, 0, 3*len(s)/2) // Try to avoid more allocations.
+	for len(s) > 0 {
+		c, multibyte, ss, err := UnquoteChar(s, quoter)
+		if err != nil {
+			return []byte{}, err
+		}
+		s = ss
+		if c < utf8.RuneSelf || !multibyte {
+			buf = append(buf, byte(c))
+		} else {
+			n := utf8.EncodeRune(runeTmp[:], c)
+			buf = append(buf, runeTmp[:n]...)
+		}
+		if quoter == sQuote && len(s) != 0 {
+			// single-quoted must be single character
+			return []byte{}, ErrSyntax
+		}
+	}
+	return buf, nil
+}
+
 func Atof32(src []byte) (f float32, err error) {
 	if val, ok := special(src); ok {
 		return float32(val), nil
@@ -513,7 +732,7 @@ func AppendFloat(dst []byte, src float64, fmt byte, bitSize int) []byte {
 // FormatUint returns the string representation of i in the given base,
 // for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
 // for digit values >= 10.
-func FormatUint(src uint64) string {
+func FormatUint(src uint64) []byte {
 	if src < nSmalls {
 		return small(int(src))
 	}
@@ -524,7 +743,7 @@ func FormatUint(src uint64) string {
 // FormatInt returns the string representation of i in the given base,
 // for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
 // for digit values >= 10.
-func FormatInt(src int64) string {
+func FormatInt(src int64) []byte {
 	if 0 <= src && src < nSmalls {
 		return small(int(src))
 	}
@@ -1048,12 +1267,12 @@ func max(a, b int) int {
 }
 
 // small returns the string for an i with 0 <= i < nSmalls.
-func small(i int) string {
+func small(i int) []byte {
 	off := 0
 	if i < 10 {
 		off = 1
 	}
-	return smallsString[i*2+off : i*2+2]
+	return []byte(smallsString[i*2+off : i*2+2])
 }
 
 // formatBits computes the string representation of u in base 10.
@@ -1062,7 +1281,7 @@ func small(i int) string {
 // returned as the first result value; otherwise the string is returned
 // as the second result value.
 //
-func formatBits(dst []byte, u uint64, neg, willAppend bool) (d []byte, s string) {
+func formatBits(dst []byte, u uint64, neg, willAppend bool) ([]byte, []byte) {
 	var a [64 + 1]byte // +1 for sign of 64bit value in base 2
 	i := len(a)
 
@@ -1129,11 +1348,9 @@ func formatBits(dst []byte, u uint64, neg, willAppend bool) (d []byte, s string)
 	}
 
 	if willAppend {
-		d = append(dst, a[i:]...)
-		return
+		return append(dst, a[i:]...), []byte{}
 	}
-	s = string(a[i:])
-	return
+	return []byte{}, a[i:]
 }
 
 // trim trailing zeros from number.

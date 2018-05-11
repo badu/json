@@ -21,30 +21,23 @@ import (
 )
 
 type Optionals struct {
-	Sr string `json:"sr"`
-	So string `json:"so,omitempty"`
-	Sw string `json:"-"`
-
-	Ir int `json:"omitempty"` // actually named omitempty, not an option
-	Io int `json:"io,omitempty"`
-
-	Slr []string `json:"slr,random"`
-	Slo []string `json:"slo,omitempty"`
-
-	Mr map[string]interface{} `json:"mr"`
-	Mo map[string]interface{} `json:",omitempty"`
-
-	Fr float64 `json:"fr"`
-	Fo float64 `json:"fo,omitempty"`
-
-	Br bool `json:"br"`
-	Bo bool `json:"bo,omitempty"`
-
-	Ur uint `json:"ur"`
-	Uo uint `json:"uo,omitempty"`
-
-	Str struct{} `json:"str"`
-	Sto struct{} `json:"sto,omitempty"`
+	Sr  string                 `json:"sr"`
+	So  string                 `json:"so,omitempty"`
+	Sw  string                 `json:"-"`
+	Ir  int                    `json:"omitempty"` // actually named omitempty, not an option
+	Io  int                    `json:"io,omitempty"`
+	Slr []string               `json:"slr,random"`
+	Slo []string               `json:"slo,omitempty"`
+	Mr  map[string]interface{} `json:"mr"`
+	Mo  map[string]interface{} `json:",omitempty"`
+	Fr  float64                `json:"fr"`
+	Fo  float64                `json:"fo,omitempty"`
+	Br  bool                   `json:"br"`
+	Bo  bool                   `json:"bo,omitempty"`
+	Ur  uint                   `json:"ur"`
+	Uo  uint                   `json:"uo,omitempty"`
+	Str struct{}               `json:"str"`
+	Sto struct{}               `json:"sto,omitempty"`
 }
 
 var optionalsExpected = `{
@@ -531,13 +524,13 @@ func TestStringBytes(t *testing.T) {
 		r = append(r, i)
 	}
 	s := string(r) + "\xff\xff\xffhello" // some invalid UTF-8 too
-
+	byteS := []byte(s)
 	for _, escapeHTML := range []bool{true, false} {
-		es := &encodeState{}
-		es.string(s, escapeHTML)
+		es := &encodeState{opts: encOpts{escapeHTML: escapeHTML}}
+		es.stringBytes(byteS)
 
-		esBytes := &encodeState{}
-		esBytes.stringBytes([]byte(s), escapeHTML)
+		esBytes := &encodeState{opts: encOpts{escapeHTML: escapeHTML}}
+		esBytes.stringBytes(byteS)
 
 		enc := es.Buffer.String()
 		encBytes := esBytes.Buffer.String()

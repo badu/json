@@ -361,7 +361,7 @@ func NewSmallPayload() *SmallPayload {
 	}
 }
 
-func BenchmarkEncodingJsonStructMedium(b *testing.B) {
+func BenchmarkOldUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var data = MediumPayload{}
@@ -369,7 +369,7 @@ func BenchmarkEncodingJsonStructMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodingNewJsonStructMedium(b *testing.B) {
+func BenchmarkNewUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var data = MediumPayload{}
@@ -377,7 +377,7 @@ func BenchmarkEncodingNewJsonStructMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkJSONDecodeObjSmall(b *testing.B) {
+func BenchmarkOldUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		result := SmallPayload{}
@@ -385,7 +385,7 @@ func BenchmarkJSONDecodeObjSmall(b *testing.B) {
 	}
 }
 
-func BenchmarkNewJSONDecodeObjSmall(b *testing.B) {
+func BenchmarkNewUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {
 		result := SmallPayload{}
@@ -393,7 +393,7 @@ func BenchmarkNewJSONDecodeObjSmall(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodingJsonEncodeLargeStruct(b *testing.B) {
+func BenchmarkOldMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewLargePayload()); err != nil {
@@ -401,7 +401,7 @@ func BenchmarkEncodingJsonEncodeLargeStruct(b *testing.B) {
 		}
 	}
 }
-func BenchmarkEncodingNewJsonEncodeLargeStruct(b *testing.B) {
+func BenchmarkNewMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewLargePayload()); err != nil {
@@ -410,7 +410,7 @@ func BenchmarkEncodingNewJsonEncodeLargeStruct(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodingJsonEncodeMediumStruct(b *testing.B) {
+func BenchmarkOldMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewMediumPayload()); err != nil {
@@ -418,7 +418,7 @@ func BenchmarkEncodingJsonEncodeMediumStruct(b *testing.B) {
 		}
 	}
 }
-func BenchmarkEncodingNewJsonEncodeMediumStruct(b *testing.B) {
+func BenchmarkNewMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewMediumPayload()); err != nil {
@@ -427,7 +427,7 @@ func BenchmarkEncodingNewJsonEncodeMediumStruct(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodingJsonEncodeSmallStruct(b *testing.B) {
+func BenchmarkOldMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewSmallPayload()); err != nil {
@@ -435,7 +435,7 @@ func BenchmarkEncodingJsonEncodeSmallStruct(b *testing.B) {
 		}
 	}
 }
-func BenchmarkEncodingNewJsonEncodeSmallStruct(b *testing.B) {
+func BenchmarkNewMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewSmallPayload()); err != nil {

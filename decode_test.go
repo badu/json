@@ -790,7 +790,7 @@ func TestMarshalEmbeds(t *testing.T) {
 	}
 	want := "{\"Level0\":1,\"Level1b\":2,\"Level1c\":3,\"Level1a\":5,\"LEVEL1B\":6,\"e\":{\"Level1a\":8,\"Level1b\":9,\"Level1c\":10,\"Level1d\":11,\"x\":12},\"Loop1\":13,\"Loop2\":14,\"X\":15,\"Y\":16,\"Z\":17,\"Q\":18}"
 	if string(b) != want {
-		t.Errorf("Wrong marshal result.\n got: %q\nwant: %q", b, want)
+		t.Errorf("Wrong marshal result.\n got:\n%q\nwant:\n%q", b, want)
 	}
 }
 
@@ -2667,7 +2667,7 @@ func diff(t *testing.T, a, b []byte) {
 			if j < 0 {
 				j = 0
 			}
-			t.Errorf("diverge at %d: «%s» vs «%s»\nFull dump:\n%s\n%s", i, trim(a[j:]), trim(b[j:]), a, b)
+			t.Errorf("diverge at %d:\n«%s»\nvs\n«%s»\nFull dump:\n%s\n%s", i, trim(a[j:]), trim(b[j:]), a, b)
 			return
 		}
 	}

@@ -21,10 +21,6 @@ const (
 	kelvin       = '\u212a'
 	smallLongEss = '\u017f'
 
-	jsonTagName     = "json"
-	stringTagOption = "string"
-	omitTagOption   = "omitempty"
-
 	comma       byte = ','
 	squareOpen  byte = '['
 	squareClose byte = ']'
@@ -32,7 +28,12 @@ const (
 	curlClose   byte = '}'
 	zero        byte = '0'
 	one         byte = '1'
+	two         byte = '2'
+	three       byte = '3'
+	four        byte = '4'
 	five        byte = '5'
+	six         byte = '6'
+	seven       byte = '7'
 	nine        byte = '9'
 	tab         byte = '\t'
 	newLine     byte = '\n'
@@ -207,7 +208,7 @@ type (
 	// An UnsupportedTypeError is returned by Marshal when attempting
 	// to encode an unsupported value type.
 	UnsupportedTypeError struct {
-		Type reflect.Type
+		Type *RType
 	}
 
 	UnsupportedValueError struct {
@@ -215,7 +216,7 @@ type (
 	}
 
 	MarshalerError struct {
-		Type reflect.Type
+		Type *RType
 		Err  error
 	}
 
@@ -298,6 +299,7 @@ type (
 	// tag, or the empty string. It does not include the leading comma.
 	tagOptions string
 
+	tagOptionsByte []byte
 	/**
 	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
 	The documentation states :
@@ -305,16 +307,16 @@ type (
 	For this reason, sorting map keys is optional and default false.
 	*/
 	KeyValuePair struct {
-		value   reflect.Value
-		keyName string
+		value   Value
+		keyName []byte
 	}
 
 	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
 	// A field represents a single field found in a struct.
 	MarshalField struct {
 		indexes  []int
-		name     string
-		Type     reflect.Type
+		name     []byte
+		Type     *RType
 		tag      bool
 		willOmit bool
 		isBasic  bool
@@ -344,7 +346,7 @@ type (
 
 var (
 	marshalerFieldCache struct {
-		value atomic.Value // map[reflect.Type][]MarshalField
+		value atomic.Value // map[*RType]*[]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
 
@@ -357,9 +359,13 @@ var (
 	// the data slice while the decoder executes.
 	errPhase = errors.New("JSON decoder out of sync - data changing underfoot?")
 
-	nullLiteral  = []byte("null")
-	trueLiteral  = []byte("true")
-	falseLiteral = []byte("false")
+	nullLiteral       = []byte("null")
+	trueLiteral       = []byte("true")
+	falseLiteral      = []byte("false")
+	jsonTagName       = []byte("json")
+	stringTagOption   = []byte("string")
+	omitTagOption     = []byte("omitempty")
+	allowedRunesInTag = []byte("!#$%&()*+-./:<=>?@[]^_{|}~ ")
 
 	numberType = reflect.TypeOf(Number(""))
 
@@ -367,7 +373,7 @@ var (
 
 	encodeStatePool sync.Pool
 
-	marshalerType               = reflect.TypeOf(new(Marshaler)).Elem()
+	marshalerType               = TypeOf(new(Marshaler)).Deref()
 	unmarshalerType             = reflect.TypeOf(new(Unmarshaler)).Elem()
 	_               Marshaler   = (*RawMessage)(nil)
 	_               Unmarshaler = (*RawMessage)(nil)
