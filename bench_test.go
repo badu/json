@@ -77,6 +77,45 @@ func codeInit() {
 	}
 }
 
+func oldCodeInit() {
+	f, err := os.Open("testdata/code.json.gz")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		panic(err)
+	}
+	data, err := ioutil.ReadAll(gz)
+	if err != nil {
+		panic(err)
+	}
+
+	codeJSON = data
+
+	if err := json.Unmarshal(codeJSON, &codeStruct); err != nil {
+		panic("unmarshal code.json: " + err.Error())
+	}
+
+	if data, err = json.Marshal(&codeStruct); err != nil {
+		panic("marshal code.json: " + err.Error())
+	}
+
+	if !bytes.Equal(data, codeJSON) {
+		println("different lengths", len(data), len(codeJSON))
+		for i := 0; i < len(data) && i < len(codeJSON); i++ {
+			if data[i] != codeJSON[i] {
+				println("re-marshal: changed at byte", i)
+				println("orig: ", string(codeJSON[i-10:i+10]))
+				println("new: ", string(data[i-10:i+10]))
+				break
+			}
+		}
+		panic("re-marshal code.json: different result")
+	}
+}
+
 func BenchmarkCodeEncoder(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
@@ -97,7 +136,7 @@ func BenchmarkCodeEncoder(b *testing.B) {
 func BenchmarkOldCodeEncoder(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
-		codeInit()
+		oldCodeInit()
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
@@ -130,7 +169,7 @@ func BenchmarkCodeMarshal(b *testing.B) {
 func BenchmarkOldCodeMarshal(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
-		codeInit()
+		oldCodeInit()
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
@@ -170,7 +209,7 @@ func BenchmarkCodeDecoder(b *testing.B) {
 func BenchmarkOldCodeDecoder(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
-		codeInit()
+		oldCodeInit()
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
@@ -285,7 +324,7 @@ func BenchmarkCodeUnmarshal(b *testing.B) {
 func BenchmarkOldCodeUnmarshal(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
-		codeInit()
+		oldCodeInit()
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
@@ -318,7 +357,7 @@ func BenchmarkCodeUnmarshalReuse(b *testing.B) {
 func BenchmarkOldCodeUnmarshalReuse(b *testing.B) {
 	if codeJSON == nil {
 		b.StopTimer()
-		codeInit()
+		oldCodeInit()
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
