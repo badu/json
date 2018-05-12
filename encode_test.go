@@ -1187,18 +1187,22 @@ func TestNewNull(t *testing.T) {
 			sql.NullString
 		}
 
+		NullNotNull interface {
+		}
+
 		Purchase struct {
-			ID          int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
-			EmptyName   string      `json:"emptyName,omitempty"`
-			EmptyId     int64       `json:"emptyId,omitempty"`
-			EmptyBool   bool        `json:"emptyBool,omitempty"`
-			UUID        NullString  `json:"nullUuid,omitempty"`
-			LicenseUUID NullString  `json:"nullLicenseUuid,omitempty"`
-			StartDate   NullTime    `json:"startDate,omitempty"`
-			EndDate     NullTime    `json:"endDate,omitempty"`
-			One         NullInt     `json:"one,omitempty"`
-			Two         NullInt     `json:"two,omitempty"`
-			MyStruct    EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
+			ID              int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
+			EmptyName       string      `json:"emptyName,omitempty"`
+			EmptyId         int64       `json:"emptyId,omitempty"`
+			EmptyBool       bool        `json:"emptyBool,omitempty"`
+			UUID            NullString  `json:"nullUuid,omitempty"`
+			LicenseUUID     NullString  `json:"nullLicenseUuid,omitempty"`
+			StartDate       NullTime    `json:"startDate,omitempty"`
+			EndDate         NullTime    `json:"endDate,omitempty"`
+			One             NullInt     `json:"one,omitempty"`
+			Two             NullInt     `json:"two,omitempty"`
+			MyStruct        EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
+			TestNullNotNull NullNotNull `json:"testNullInterface,omitempty"`
 		}
 	)
 	now := time.Now()

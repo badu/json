@@ -342,25 +342,25 @@ func (v Value) arrayEncoder(walker *encodeState) {
 
 func (v Value) structEncoder(walker *encodeState) {
 
-	cachedFields, _ := marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
 	fieldsInfo := cachedFields[v.Type]
 	if fieldsInfo == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fieldsInfo = v.Type.getMarshalFields()
+		fieldsInfo = getMarshalFields(v.Type)
 		if fieldsInfo != nil {
-			marshalerFieldCache.mu.Lock()
-			cachedFields, _ = marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+			fieldsCache.mu.Lock()
+			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
 
-			newFieldsMap := make(map[*RType]*marshalFields, len(cachedFields)+1)
+			newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
 
 			for typeKey, fieldsValues := range cachedFields {
 				newFieldsMap[typeKey] = fieldsValues
 			}
 
 			newFieldsMap[v.Type] = fieldsInfo
-			marshalerFieldCache.value.Store(newFieldsMap)
-			marshalerFieldCache.mu.Unlock()
+			fieldsCache.value.Store(newFieldsMap)
+			fieldsCache.mu.Unlock()
 		}
 	}
 
@@ -368,7 +368,7 @@ func (v Value) structEncoder(walker *encodeState) {
 	walker.WriteByte(curlOpen)
 
 	first := true
-	for _, f := range *fieldsInfo {
+	for _, f := range fieldsInfo {
 		// restoring to original value type, since it gets altered below
 		valueType := v.Type
 
@@ -398,36 +398,35 @@ func (v Value) structEncoder(walker *encodeState) {
 		}
 
 		// Serialize Nulls Condition : 1. is a struct which has a name that starts with "Null" and must have "omitempty"
-		if strings.HasPrefix(f.Type.Name(), "Null") && fieldValue.Kind() == Struct && f.willOmit {
-
-			cachedFields2, _ := marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+		if f.isNullSuspect {
+			cachedFields2, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
 			subFields := cachedFields2[fieldValue.Type]
 			if subFields == nil {
 
 				// Compute fields without lock.
 				// Might duplicate effort but won't hold other computations back.
-				subFields = fieldValue.Type.getMarshalFields()
+				subFields = getMarshalFields(fieldValue.Type)
 				if subFields != nil {
 					// store them
-					marshalerFieldCache.mu.Lock()
-					cachedFields2, _ = marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+					fieldsCache.mu.Lock()
+					cachedFields2, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
 
-					newFieldsMap := make(map[*RType]*marshalFields, len(cachedFields2)+1)
+					newFieldsMap := make(map[*RType]marshalFields, len(cachedFields2)+1)
 
 					for typeKey, fieldsValues := range cachedFields2 {
 						newFieldsMap[typeKey] = fieldsValues
 					}
 
 					newFieldsMap[fieldValue.Type] = subFields
-					marshalerFieldCache.value.Store(newFieldsMap)
-					marshalerFieldCache.mu.Unlock()
+					fieldsCache.value.Store(newFieldsMap)
+					fieldsCache.mu.Unlock()
 				}
 			}
 
 			// 2. has exactly two fields : one boolean (called Valid) and one of a basic type (called as the basic type - e.g. "String")
-			if len(*subFields) == 2 {
+			if len(subFields) == 2 {
 				var validField, carrierField Value
-				for _, sf := range *subFields {
+				for _, sf := range subFields {
 					if bytes.Equal(sf.name, []byte("Valid")) {
 						//foundValid = true
 						subFieldType := fieldValue.Type
@@ -606,7 +605,7 @@ func (v Value) mapEncoder(walker *encodeState) {
 
 // getMarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func (t *RType) getMarshalFields() *marshalFields {
+func getMarshalFields(t *RType) marshalFields {
 	// Embedded fields to explore at the current level and the next.
 	fields := marshalFields{}
 	next := marshalFields{{Type: t}}
@@ -696,14 +695,19 @@ func (t *RType) getMarshalFields() *marshalFields {
 							isBasic = true
 						}
 					}
+					willBeOmitted := opts.Contains(omitTagOption)
 					f := MarshalField{
 						name:      jsonName,
 						tag:       tagged,
 						indexes:   indexes,
 						Type:      fieldType,
-						willOmit:  opts.Contains(omitTagOption),
 						equalFold: foldFunc(jsonName),
 						isBasic:   isBasic,
+						willOmit:  willBeOmitted,
+					}
+
+					if strings.HasPrefix(fieldType.Name(), "Null") && fieldKind == Struct && willBeOmitted {
+						f.isNullSuspect = true
 					}
 
 					result = append(result, f)
@@ -774,5 +778,5 @@ func (t *RType) getMarshalFields() *marshalFields {
 	result = out
 	sort.Sort(marshalFields(result))
 
-	return &result
+	return result
 }

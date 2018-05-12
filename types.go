@@ -313,21 +313,22 @@ type (
 	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
 	// A field represents a single field found in a struct.
 	MarshalField struct {
-		indexes   []int
-		name      []byte
-		Type      *RType
-		equalFold qualFn // bytes.EqualFold or equivalent
-		tag       bool
-		willOmit  bool
-		isBasic   bool
+		indexes       []int
+		name          []byte
+		Type          *RType
+		equalFold     qualFn // bytes.EqualFold or equivalent
+		tag           bool
+		willOmit      bool
+		isBasic       bool
+		isNullSuspect bool
 	}
 
 	qualFn func(srcKey, destKey []byte) bool
 )
 
 var (
-	marshalerFieldCache struct {
-		value atomic.Value // map[*RType]*[]MarshalField
+	fieldsCache struct {
+		value atomic.Value // map[*RType][]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
 	// errPhase is used for errors that should not happen unless

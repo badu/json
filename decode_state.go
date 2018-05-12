@@ -608,39 +608,35 @@ func (d *decodeState) doMap(v Value) {
 }
 
 func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField {
-	var result *MarshalField
-
-	cachedFields, _ := marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
 	fields := cachedFields[value.Type]
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = value.Type.getMarshalFields()
+		fields = getMarshalFields(value.Type)
 		if fields == nil {
 			//fields = unmarshalFields{}
-			return result
+			return nil
 		}
 
-		marshalerFieldCache.mu.Lock()
-		cachedFields, _ = marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
-		newFieldsMap := make(map[*RType]*marshalFields, len(cachedFields)+1)
+		fieldsCache.mu.Lock()
+		cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
+		newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
 		for k, v := range cachedFields {
 			newFieldsMap[k] = v
 		}
 		newFieldsMap[value.Type] = fields
-		marshalerFieldCache.value.Store(newFieldsMap)
-		marshalerFieldCache.mu.Unlock()
+		fieldsCache.value.Store(newFieldsMap)
+		fieldsCache.mu.Unlock()
 	}
-
-	for i := range *fields {
-		curField := (*fields)[i]
+	var result *MarshalField
+	for i := range fields {
+		curField := &fields[i]
 		if bytes.Equal(curField.name, fieldName) {
-			result = &curField
-			break
+			return curField
 		}
-		// TODO : equal fold should be searched in a sync.Map by the fieldName -> map[ []byte ] func(srcKey, destKey []byte) bool
 		if result == nil && curField.equalFold(curField.name, fieldName) {
-			result = &curField
+			result = curField
 		}
 	}
 	return result
