@@ -9,16 +9,15 @@ package json
 import (
 	"encoding/base64"
 	"fmt"
-	"reflect"
 )
 
-func newWalker(v reflect.Value) *SetWalker {
+func newWalker(v Value) *SetWalker {
 	return &SetWalker{Value: v}
 }
 
 func (w *SetWalker) init(v interface{}) bool {
-	w.Value = reflect.ValueOf(v)
-	if w.Value.Kind() != reflect.Ptr || w.Value.IsNil() {
+	w.Value = ReflectOn(v)
+	if w.Value.Kind() != Ptr || w.Value.IsNil() {
 		return false
 	}
 	return true
@@ -27,51 +26,52 @@ func (w *SetWalker) init(v interface{}) bool {
 // indirect walks down v allocating pointers as needed, until it gets to a non-pointer.
 // if it encounters an Unmarshaler, indirect stops and returns that.
 // if decodingNull is true, indirect stops at the last pointer so it can be set to nil.
-func (w *SetWalker) indirect(implements reflect.Type, decodingNull bool) bool {
-	// If v is a named type and is addressable,
-	// start with its address, so that if the type has pointer methods,
-	// we find them.
-	if w.Value.Kind() != reflect.Ptr && w.Value.Type().Name() != "" && w.Value.CanAddr() {
+func (w *SetWalker) indirect(implements *RType, decodingNull bool) bool {
+	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
+	if w.Value.Kind() != Ptr && w.Value.Type.Name() != "" && w.Value.CanAddr() {
 		w.Value = w.Value.Addr()
 	}
 	for {
 		// Load value from interface, but only if the result will be
 		// usefully addressable.
-		if w.Value.Kind() == reflect.Interface && !w.Value.IsNil() {
-			e := w.Value.Elem()
-			if e.Kind() == reflect.Ptr && !e.IsNil() && (!decodingNull || e.Elem().Kind() == reflect.Ptr) {
-				w.Value = e
-				continue
+		if w.Value.Kind() == Interface && !w.Value.IsNil() {
+			e := w.Value.Iface() // .Elem()
+			if e.Kind() == Ptr && !e.IsNil() {
+				if !decodingNull || e.Deref().Kind() == Ptr {
+					w.Value = e
+					continue
+				}
 			}
 		}
 
-		if w.Value.Kind() != reflect.Ptr {
+		if w.Value.Kind() != Ptr {
 			break
 		}
 
-		if w.Value.Elem().Kind() != reflect.Ptr && decodingNull && w.Value.CanSet() {
+		// now w.Value.Kind() == Ptr
+		if w.Value.Deref().Kind() != Ptr && decodingNull && w.Value.CanSet() {
 			break
 		}
 
 		if w.Value.IsNil() {
-			w.Value.Set(reflect.New(w.Value.Type().Elem()))
+			w.Value.Set(New(w.Value.Type.Deref()))
 		}
 
-		if w.Value.Type().NumMethod() > 0 {
-			if w.Value.Type().Implements(implements) {
+		if w.Value.Type.NumMethod() > 0 {
+			if w.Value.Type.Implements(implements) {
 				return true
 			}
 		}
 
-		w.Value = w.Value.Elem()
+		w.Value = w.Value.Deref()
 	}
 	return false
 }
 
 func (w *SetWalker) setNull() {
 	switch w.Value.Kind() {
-	case reflect.Interface, reflect.Ptr, reflect.Map, reflect.Slice:
-		w.Value.Set(reflect.Zero(w.Value.Type()))
+	case Interface, Ptr, Map, Slice:
+		w.Value.Set(Zero(w.Value.Type))
 		// otherwise, ignore null for primitives/string
 	}
 }
@@ -80,11 +80,11 @@ func (w *SetWalker) setBool(boolValue bool) error {
 	switch w.Value.Kind() {
 	default:
 		return fmt.Errorf("invalid bool")
-	case reflect.Bool:
-		w.Value.SetBool(boolValue)
-	case reflect.Interface:
+	case Bool:
+		*(*bool)(w.Value.Ptr) = boolValue
+	case Interface:
 		if w.Value.NumMethod() == 0 {
-			w.Value.Set(reflect.ValueOf(boolValue))
+			w.Value.Set(ReflectOn(boolValue))
 		} else {
 			return fmt.Errorf("invalid bool")
 		}
@@ -93,7 +93,7 @@ func (w *SetWalker) setBool(boolValue bool) error {
 }
 
 func (w *SetWalker) isIfaceWNoMeths() bool {
-	if w.Value.Kind() == reflect.Interface && w.Value.NumMethod() == 0 {
+	if w.Value.Kind() == Interface && w.Value.NumMethod() == 0 {
 		return true
 	}
 	return false
@@ -103,9 +103,9 @@ func (w *SetWalker) setString(s []byte) error {
 	switch w.Value.Kind() {
 	default:
 		return fmt.Errorf("invalid string")
-	case reflect.Slice:
+	case Slice:
 		stringValue := string(s)
-		if w.Value.Type().Elem().Kind() != reflect.Uint8 {
+		if w.Value.Type.ConvToSlice().ElemType.Kind() != Uint8 {
 			return fmt.Errorf("invalid string")
 		}
 		b := make([]byte, base64.StdEncoding.DecodedLen(len(stringValue)))
@@ -113,14 +113,13 @@ func (w *SetWalker) setString(s []byte) error {
 		if err != nil {
 			return err
 		}
-		w.Value.SetBytes(b[:n])
-	case reflect.String:
-		stringValue := string(s)
-		w.Value.SetString(stringValue)
-	case reflect.Interface:
+		*(*[]byte)(w.Value.Ptr) = b[:n]
+	case String:
+		*(*string)(w.Value.Ptr) = string(s)
+	case Interface:
 		if w.Value.NumMethod() == 0 {
 			stringValue := string(s)
-			w.Value.Set(reflect.ValueOf(stringValue))
+			w.Value.Set(ReflectOn(stringValue))
 		} else {
 			return fmt.Errorf("invalid string")
 		}
@@ -134,7 +133,7 @@ func convertNumber(from []byte, useNumber bool) (interface{}, error) {
 	}
 	f, err := Atof64(from)
 	if err != nil {
-		return nil, fmt.Errorf("invalid number") //&UnmarshalTypeError{Value: "number " + string(from), Type: reflect.TypeOf(0.0), Offset: int64(d.offset)}
+		return nil, fmt.Errorf("invalid number") //&UnmarshalTypeError{Value: "number " + string(from), Type: TypeOf(0.0), Offset: int64(d.offset)}
 	}
 	return f, nil
 }
@@ -142,17 +141,20 @@ func convertNumber(from []byte, useNumber bool) (interface{}, error) {
 func (w *SetWalker) setNumber(item []byte, useNumber bool) error {
 	switch w.Value.Kind() {
 	default:
-		if w.Value.Kind() == reflect.String && w.Value.Type() == numberType {
-			s := string(item)
-			w.Value.SetString(s)
-			if !IsValidNumber(s) {
+		if w.Value.Kind() == String && w.Value.Type == typeOfNo {
+			println("Yes, typed number, but string")
+			if w.Value.CanSet() {
+				*(*string)(w.Value.Ptr) = string(item)
+			}
+			//TODO: check condition below (unused?)
+			if !IsValidNumber(string(item)) {
 				//d.error(fmt.Errorf("json: invalid number literal, trying to unmarshal %q into Number", item))
 				return fmt.Errorf("invalid number")
 			}
 			break
 		}
 		return fmt.Errorf("invalid number")
-	case reflect.Interface:
+	case Interface:
 		n, err := convertNumber(item, useNumber)
 		if err != nil {
 			//d.saveError(err)
@@ -162,18 +164,34 @@ func (w *SetWalker) setNumber(item []byte, useNumber bool) error {
 		if w.Value.NumMethod() != 0 {
 			return fmt.Errorf("invalid number")
 		}
-		w.Value.Set(reflect.ValueOf(n))
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		w.Value.Set(ReflectOn(n))
+	case Int, Int8, Int16, Int32, Int64:
 		result, isNegative := FastNumber(item)
 		if isNegative {
 			result = -result
 		}
 		if w.Value.OverflowInt(int64(result)) {
+			println("Overflows")
 			//d.saveError(&UnmarshalTypeError{Value: "integer " + string(item), Type: value.Type(), Offset: int64(d.offset)})
-			return fmt.Errorf("invalid number")
+			return fmt.Errorf("overflows number")
 		}
-		w.Value.SetInt(int64(result))
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		// TODO : GLOBLA CanSet should be first condition.
+		if w.Value.CanSet() {
+			switch w.Value.Kind() {
+			case Int8:
+				*(*int8)(w.Value.Ptr) = int8(result)
+			case Int16:
+				*(*int16)(w.Value.Ptr) = int16(result)
+			case Int32:
+				*(*int32)(w.Value.Ptr) = int32(result)
+			case Int64:
+				*(*int64)(w.Value.Ptr) = int64(result)
+			default:
+				*(*int)(w.Value.Ptr) = int(result)
+			}
+		}
+
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 		result, isNegative := FastNumber(item)
 		if isNegative {
 			// TODO : make issue on golang github
@@ -182,23 +200,48 @@ func (w *SetWalker) setNumber(item []byte, useNumber bool) error {
 		}
 		if w.Value.OverflowUint(result) {
 			//d.saveError(&UnmarshalTypeError{Value: "unsigned integer " + string(item), Type: value.Type(), Offset: int64(d.offset)})
-			return fmt.Errorf("invalid number")
+			return fmt.Errorf("overflowsv number")
 		}
-		w.Value.SetUint(result)
-	case reflect.Float32:
+
+		if w.Value.CanSet() {
+			switch w.Value.Kind() {
+			case Uint8:
+				*(*uint8)(w.Value.Ptr) = uint8(result)
+			case Uint16:
+				*(*uint16)(w.Value.Ptr) = uint16(result)
+			case Uint32:
+				*(*uint32)(w.Value.Ptr) = uint32(result)
+			case Uint64:
+				*(*uint64)(w.Value.Ptr) = uint64(result)
+			case UintPtr:
+				*(*uintptr)(w.Value.Ptr) = uintptr(result)
+			default:
+				*(*uint)(w.Value.Ptr) = uint(result)
+			}
+
+		}
+
+	case Float32:
 		n, err := Atof32(item)
 		if err != nil || w.Value.OverflowFloat(float64(n)) {
 			//d.saveError(&UnmarshalTypeError{Value: "float " + s, Type: value.Type(), Offset: int64(d.offset)})
-			return fmt.Errorf("invalid number")
+			return fmt.Errorf("overflows number")
 		}
-		w.Value.SetFloat(float64(n))
-	case reflect.Float64:
+
+		if w.Value.CanSet() {
+			*(*float32)(w.Value.Ptr) = float32(n)
+		}
+
+	case Float64:
 		n, err := Atof64(item)
 		if err != nil || w.Value.OverflowFloat(n) {
 			//d.saveError(&UnmarshalTypeError{Value: "float " + s, Type: value.Type(), Offset: int64(d.offset)})
-			return fmt.Errorf("invalid number")
+			return fmt.Errorf("overflows number")
 		}
-		w.Value.SetFloat(n)
+
+		if w.Value.CanSet() {
+			*(*float64)(w.Value.Ptr) = n
+		}
 	}
 	return nil
 }
@@ -206,19 +249,21 @@ func (w *SetWalker) setNumber(item []byte, useNumber bool) error {
 func (w *SetWalker) startMap() bool {
 	// Map key must either have string kind, have an integer kind
 	// Check type of target: `struct` or `map[T1]T2` where `T1` is string, an integer type
-	switch w.Value.Type().Key().Kind() {
-	case reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+
+	mapType := w.Value.Type.ConvToMap()
+	switch mapType.KeyType.Kind() {
+	case String,
+		Int, Int8, Int16, Int32, Int64,
+		Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 	default:
 		return false
 	}
 
 	if w.Value.IsNil() {
-		w.Value.Set(reflect.MakeMap(w.Value.Type()))
+		w.Value.Set(MakeMap(w.Value.Type))
 	}
 
-	w.mapElem = reflect.New(w.Value.Type().Elem()).Elem()
+	w.mapElem = New(mapType.ElemType).Deref()
 
 	return true
 }
@@ -226,35 +271,35 @@ func (w *SetWalker) startMap() bool {
 // Figure out field corresponding to key.
 func (w *SetWalker) getMapElem() *SetWalker {
 	if w.mapElem.IsValid() {
-		w.mapElem.Set(reflect.Zero(w.Value.Type().Elem()))
+		w.mapElem.Set(Zero(w.Value.Type.ConvToMap().ElemType))
 	}
 	return newWalker(w.mapElem)
 }
 
 func (w *SetWalker) loadMapIndex(key []byte) error {
-	valueTypeKey := w.Value.Type().Key()
+	valueTypeKey := w.Value.Type.ConvToMap().KeyType
 	// Write value back to map; if using struct, corespValue points into struct already.
 	switch valueTypeKey.Kind() {
-	case reflect.String:
-		keyValue := reflect.ValueOf(key).Convert(valueTypeKey)
+	case String:
+		keyValue := ReflectOn(key).Convert(valueTypeKey)
 		w.Value.SetMapIndex(keyValue, w.mapElem)
 		return nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case Int, Int8, Int16, Int32, Int64:
 		num, err := IntParse(key)
-		if err != nil || reflect.Zero(valueTypeKey).OverflowInt(num) {
+		if err != nil || Zero(valueTypeKey).OverflowInt(num) {
 			//d.saveError(&UnmarshalTypeError{Value: "number " + s, Type: valueTypeKey, Offset: int64(start + 1)})
 			return fmt.Errorf("bad map key")
 		}
-		keyValue := reflect.ValueOf(num).Convert(valueTypeKey)
+		keyValue := ReflectOn(num).Convert(valueTypeKey)
 		w.Value.SetMapIndex(keyValue, w.mapElem)
 		return nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 		num, err := UintParse(key)
-		if err != nil || reflect.Zero(valueTypeKey).OverflowUint(num) {
+		if err != nil || Zero(valueTypeKey).OverflowUint(num) {
 			//d.saveError(&UnmarshalTypeError{Value: "number " + s, Type: valueTypeKey, Offset: int64(start + 1)})
 			return fmt.Errorf("bad map key")
 		}
-		keyValue := reflect.ValueOf(num).Convert(valueTypeKey)
+		keyValue := ReflectOn(num).Convert(valueTypeKey)
 		w.Value.SetMapIndex(keyValue, w.mapElem)
 		return nil
 	}
@@ -264,15 +309,15 @@ func (w *SetWalker) loadMapIndex(key []byte) error {
 
 func (w *SetWalker) growSlice(i int) bool {
 	// Get element of array, growing if necessary.
-	if w.Value.Kind() == reflect.Slice {
+	if w.Value.Kind() == Slice {
 		// Grow slice if necessary
 		if i >= w.Value.Cap() {
 			newCap := w.Value.Cap() + w.Value.Cap()/2
 			if newCap < 4 {
 				newCap = 4
 			}
-			newSlice := reflect.MakeSlice(w.Value.Type(), w.Value.Len(), newCap)
-			reflect.Copy(newSlice, w.Value)
+			newSlice := MakeSlice(w.Value.Type, w.Value.Len(), newCap)
+			Copy(newSlice, w.Value)
 			w.Value.Set(newSlice)
 		}
 		if i >= w.Value.Len() {
@@ -291,9 +336,9 @@ func (w *SetWalker) growSlice(i int) bool {
 func (w *SetWalker) finishArray(i int) {
 	if i < w.Value.Len() {
 		switch w.Value.Kind() {
-		case reflect.Array:
+		case Array:
 			// Array. Zero the rest.
-			zero := reflect.Zero(w.Value.Type().Elem())
+			zero := Zero(w.Value.Type.ConvToArray().ElemType) //.Elem())
 			for ; i < w.Value.Len(); i++ {
 				w.Value.Index(i).Set(zero)
 			}
@@ -302,7 +347,7 @@ func (w *SetWalker) finishArray(i int) {
 		}
 	}
 
-	if i == 0 && w.Value.Kind() == reflect.Slice {
-		w.Value.Set(reflect.MakeSlice(w.Value.Type(), 0, 0))
+	if i == 0 && w.Value.Kind() == Slice {
+		w.Value.Set(MakeSlice(w.Value.Type, 0, 0))
 	}
 }

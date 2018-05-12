@@ -8,8 +8,6 @@ package json
 
 import (
 	"bytes"
-	"reflect"
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -254,6 +252,7 @@ func isValidTagNew(tag []byte) bool {
 	return true
 }
 
+/**
 func isValidTag(tag string) bool {
 	if len(tag) == 0 {
 		return false
@@ -275,6 +274,7 @@ func isValidTag(tag string) bool {
 
 // getUnmarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
+
 func getUnmarshalFields(value reflect.Value) unmarshalFields {
 	// Embedded fields to explore at the current level and the next.
 	fields := unmarshalFields{}
@@ -475,7 +475,7 @@ func dominantField(fields unmarshalFields) (UnmarshalField, bool) {
 	}
 	return fields[0], true
 }
-
+**/
 // parseTag splits a struct field's json tag into its name and comma-separated options.
 func parseTagNew(tag []byte) ([]byte, tagOptionsByte) {
 	if idx := bytes.IndexByte(tag, comma); idx != -1 {

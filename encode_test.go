@@ -95,11 +95,12 @@ func TestStringTag(t *testing.T) {
 		t.Fatalf(" got: %s\nwant: %s\n", got, stringTagExpected)
 	}
 
+	t.Logf("Marshalled :\n %s", string(got))
 	// Verify that it round-trips.
 	var s2 StringTag
 	err = NewDecoder(bytes.NewReader(got)).Decode(&s2)
 	if err != nil {
-		t.Fatalf("Decode: %v", err)
+		t.Fatalf("Decode Failed : %v", err)
 	}
 	if !reflect.DeepEqual(s, s2) {
 		t.Fatalf("decode didn't match.\nsource: %#v\nEncoded as:\n%s\ndecode: %#v", s, string(got), s2)

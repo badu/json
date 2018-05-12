@@ -6,7 +6,10 @@
 
 package json
 
-import "bytes"
+import (
+	"bytes"
+	"math"
+)
 
 func (t *RType) hasPointers() bool                { return t.kind&kindNoPointers == 0 }
 func (t *RType) isDirectIface() bool              { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
@@ -786,4 +789,353 @@ func (v Value) Field(i int) Value {
 	// In the latter case, we must have field.offset = 0, so v.ptr + field.offset is still the correct address.
 	ptr := add(v.Ptr, structFieldOffset(field))
 	return Value{Type: typ, Ptr: ptr, Flag: fl}
+}
+
+// ==============
+// Setters
+// ==============
+func (v Value) CanSet() bool                     { return v.Flag&(addressableFlag|exportFlag) == addressableFlag }
+func (v Value) cvtBytesString(t *RType) Value    { return makeString(v.ro(), string(*(*[]byte)(v.Ptr)), t) } // convert operation: []byte -> string
+func (v Value) cvtRunesString(t *RType) Value    { return makeString(v.ro(), string(*(*[]rune)(v.Ptr)), t) } // convert operation: []rune -> string
+func (v Value) cvtStringBytes(t *RType) Value    { return makeBytes(v.ro(), []byte(*(*string)(v.Ptr)), t) }  // convert operation: string -> []byte
+func (v Value) cvtStringRunes(t *RType) Value    { return makeRunes(v.ro(), []rune(*(*string)(v.Ptr)), t) }  // convert operation: string -> []rune
+func (v Value) cvtIntInt(t *RType) Value         { return makeInt(v.ro(), uint64(v.Int()), t) }              // convert operation: intXX -> [u]intXX
+func (v Value) cvtUintUint(t *RType) Value       { return makeInt(v.ro(), v.Uint(), t) }                     // convert operation: uintXX -> [u]intXX
+func (v Value) cvtFloatInt(t *RType) Value       { return makeInt(v.ro(), uint64(int64(v.Float())), t) }     // convert operation: floatXX -> intXX
+func (v Value) cvtFloatUint(t *RType) Value      { return makeInt(v.ro(), uint64(v.Float()), t) }            // convert operation: floatXX -> uintXX
+func (v Value) cvtIntFloat(t *RType) Value       { return makeFloat(v.ro(), float64(v.Int()), t) }           // convert operation: intXX -> floatXX
+func (v Value) cvtUintFloat(t *RType) Value      { return makeFloat(v.ro(), float64(v.Uint()), t) }          // convert operation: uintXX -> floatXX
+func (v Value) cvtFloatFloat(t *RType) Value     { return makeFloat(v.ro(), v.Float(), t) }                  // convert operation: floatXX -> floatXX
+func (v Value) cvtComplexComplex(t *RType) Value { return makeComplex(v.ro(), v.Complex(), t) }              // convert operation: complexXX -> complexXX
+func (v Value) cvtIntString(t *RType) Value      { return makeString(v.ro(), string(v.Int()), t) }           // convert operation: intXX -> string
+func (v Value) cvtUintString(t *RType) Value     { return makeString(v.ro(), string(v.Uint()), t) }          // convert operation: uintXX -> string
+//TODO:  do not use it in other places than convert ???
+func (v Value) Complex() complex128 {
+	switch v.Kind() {
+	case Complex64:
+		return complex128(*(*complex64)(v.Ptr))
+	default:
+		return *(*complex128)(v.Ptr)
+	}
+}
+
+//TODO:  do not use it in other places than convert ???
+func (v Value) Float() float64 {
+	switch v.Kind() {
+	case Float32:
+		return float64(*(*float32)(v.Ptr))
+	default:
+		return *(*float64)(v.Ptr)
+	}
+}
+
+//TODO:  do not use it in other places than convert ???
+func (v Value) Int() int64 {
+	switch v.Kind() {
+	case Int8:
+		return int64(*(*int8)(v.Ptr))
+	case Int16:
+		return int64(*(*int16)(v.Ptr))
+	case Int32:
+		return int64(*(*int32)(v.Ptr))
+	case Int64:
+		return *(*int64)(v.Ptr)
+	default:
+		return int64(*(*int)(v.Ptr))
+	}
+}
+
+//TODO:  do not use it in other places than convert ???
+func (v Value) Uint() uint64 {
+	switch v.Kind() {
+	case Uint8:
+		return uint64(*(*uint8)(v.Ptr))
+	case Uint16:
+		return uint64(*(*uint16)(v.Ptr))
+	case Uint32:
+		return uint64(*(*uint32)(v.Ptr))
+	case Uint64:
+		return *(*uint64)(v.Ptr)
+	case UintPtr:
+		return uint64(*(*uintptr)(v.Ptr))
+	default:
+		return uint64(*(*uint)(v.Ptr))
+	}
+}
+
+// convert operation: direct copy
+func (v Value) cvtDirect(typ *RType) Value {
+	f := v.Flag
+	ptr := v.Ptr
+	if v.CanAddr() {
+		// indirect, mutable word - make a copy
+		c := unsafeNew(typ)
+		typedmemmove(typ, c, ptr)
+		ptr = c
+		f &^= addressableFlag
+	}
+	return Value{Type: typ, Ptr: ptr, Flag: v.ro() | f}
+}
+
+// convert operation: concrete -> interface
+func (v Value) cvtT2I(typ *RType) Value {
+	target := unsafeNew(typ)
+	v.assertE2I(typ, target)
+	return Value{Type: typ, Ptr: target, Flag: v.ro() | pointerFlag | Flag(Interface)}
+}
+
+// convert operation: interface -> interface
+func (v Value) cvtI2I(typ *RType) Value {
+	if v.IsNil() {
+		ret := Zero(typ)
+		ret.Flag |= v.ro()
+		return ret
+	}
+	switch v.Kind() {
+	case Ptr:
+		return v.Deref().cvtT2I(typ)
+	case Interface:
+		return v.Iface().cvtT2I(typ)
+	default:
+		return v.cvtT2I(typ)
+	}
+}
+
+func (v Value) Convert(dst *RType) Value {
+	if v.hasMethodFlag() {
+		panic("Value.Convert : This is a method.")
+		//v = v.makeMethodValue()
+	}
+	t := v.Type
+	destKind := dst.Kind()
+	srcKind := t.Kind()
+
+	switch srcKind {
+	case Int, Int8, Int16, Int32, Int64:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return v.cvtIntInt(dst)
+		case Float32, Float64:
+			return v.cvtIntFloat(dst)
+		case String:
+			return v.cvtIntString(dst)
+		}
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return v.cvtUintUint(dst)
+		case Float32, Float64:
+			return v.cvtUintFloat(dst)
+		case String:
+			return v.cvtUintString(dst)
+		}
+	case Float32, Float64:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64:
+			return v.cvtFloatInt(dst)
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return v.cvtFloatUint(dst)
+		case Float32, Float64:
+			return v.cvtFloatFloat(dst)
+		}
+	case Complex64, Complex128:
+		switch destKind {
+		case Complex64, Complex128:
+			return v.cvtComplexComplex(dst)
+		}
+	case String:
+		sliceElem := dst.ConvToSlice().ElemType
+		if destKind == Slice && len(sliceElem.PkgPath()) == 0 {
+			switch sliceElem.Kind() {
+			case Uint8:
+				return v.cvtStringBytes(dst)
+			case Int32:
+				return v.cvtStringRunes(dst)
+			}
+		}
+	case Slice:
+		sliceElem := t.ConvToSlice().ElemType
+		if destKind == String && len(sliceElem.PkgPath()) == 0 {
+			switch sliceElem.Kind() {
+			case Uint8:
+				return v.cvtBytesString(dst)
+			case Int32:
+				return v.cvtRunesString(dst)
+			}
+		}
+	}
+
+	// dst and src have same underlying type.
+	if t.haveIdenticalUnderlyingType(dst, false) {
+		return v.cvtDirect(dst)
+	}
+
+	// dst and src are unnamed pointer types with same underlying base type.
+	if destKind == Ptr && !dst.hasName() &&
+		srcKind == Ptr && !t.hasName() &&
+		t.Deref().haveIdenticalUnderlyingType(dst.Deref(), false) {
+		return v.cvtDirect(dst)
+	}
+
+	if t.implements(dst) {
+		if srcKind == Interface {
+			return v.cvtI2I(dst)
+		}
+		return v.cvtT2I(dst)
+	}
+
+	panic("reflect.Value.Convert: value of type ") // + TypeToString(v.Type) + " cannot be converted to type " + TypeToString(t))
+}
+
+func (v Value) Set(toX Value) bool {
+	x := toX
+
+	if !v.IsValid() || !v.CanSet() {
+		panic("reflect.Value.Set : value is not settable.")
+		return false
+	}
+	// do not let unexported x leak
+	if !x.IsValid() || !x.isExported() {
+		panic("reflect.Value.Set : parameter is not exported.")
+		return false
+	}
+	var target ptr
+	if v.Kind() == Interface {
+		target = v.Ptr
+	}
+	x = x.assignTo(v.Type, target)
+	if x.isPointer() {
+		typedmemmove(v.Type, v.Ptr, x.Ptr)
+	} else {
+		loadConvPtr(v.Ptr, x.Ptr)
+	}
+	return true
+}
+
+func (v Value) Cap() int {
+	switch v.Kind() {
+	case Array:
+		return int(v.Type.ConvToArray().Len)
+	case Slice:
+		return (*sliceHeader)(v.Ptr).Cap // Slice is always bigger than a word; assume pointerFlag.
+	case String:
+		return (*stringHeader)(v.Ptr).Len
+	default:
+		// kind checks are performed in public ToSlice(), so this should NEVER happen
+
+		println("reflect.Iterable.Slice : unknown kind `") // + StringKind(v.Kind()) + "`. How did you got here?")
+
+		return 0 // The Cap of "unknown"
+	}
+}
+func (v Value) SetLen(n int) {
+	if v.Kind() != Slice || !v.IsValid() || !v.CanSet() {
+		println("reflect.SliceValue.SetLen: kind not slice (`") // + StringKind(v.Kind()) + "`) or invalid or not settable")
+		return
+	}
+	header := (*sliceHeader)(v.Ptr)
+	if uint(n) > uint(header.Cap) {
+		println("reflect.SliceValue.SetLen: slice length out of range")
+		return
+	}
+	header.Len = n
+}
+
+func (v Value) SetMapIndex(key, value Value) {
+	if !v.IsValid() || !v.isExported() {
+		println("reflect.MapValue.SetMapIndex: map must be exported")
+		return
+	}
+	if !key.IsValid() || !key.isExported() {
+		println("reflect.MapValue.SetMapIndex: key must be exported")
+		return
+	}
+
+	mapType := v.Type.ConvToMap()
+	key = key.assignTo(mapType.KeyType, nil)
+	var keyPtr ptr
+	if key.isPointer() {
+		keyPtr = key.Ptr
+	} else {
+		keyPtr = ptr(&key.Ptr)
+	}
+
+	if value.Type == nil {
+		// this allows us to delete from map, when setting key to nil value
+		mapdelete(v.Type, v.pointer(), keyPtr)
+		return
+	}
+
+	// now we check the value too - we don't check this earlier, because delete operations
+	if !value.IsValid() || !value.isExported() {
+		return
+	}
+
+	value = value.assignTo(mapType.ElemType, nil)
+	var elemPtr ptr
+	if value.isPointer() {
+		elemPtr = value.Ptr
+	} else {
+		elemPtr = ptr(&value.Ptr)
+	}
+	mapassign(v.Type, v.pointer(), keyPtr, elemPtr)
+}
+
+func (v Value) OverflowUint(x uint64) bool {
+	k := v.Kind()
+	switch k {
+	case Uint, UintPtr, Uint8, Uint16, Uint32, Uint64:
+		bitSize := v.Type.size * 8
+		trunc := (x << (64 - bitSize)) >> (64 - bitSize)
+		return x != trunc
+	}
+	panic("Overflow Uint")
+	//return x != (x<<(64-v.Type.size))>>(64-v.Type.size)
+}
+
+func (v Value) OverflowInt(x int64) bool {
+	k := v.Kind()
+	switch k {
+	case Int, Int8, Int16, Int32, Int64:
+		bitSize := v.Type.size * 8
+		trunc := (x << (64 - bitSize)) >> (64 - bitSize)
+		return x != trunc
+	}
+	panic("Overflow Int")
+	//return x != (x<<(64-v.Type.size))>>(64-v.Type.size)
+}
+
+func (v Value) OverflowFloat(x float64) bool {
+	k := v.Kind()
+	switch k {
+	case Float32:
+		if x < 0 {
+			x = -x
+		}
+		return math.MaxFloat32 < x && x <= math.MaxFloat64
+	case Float64:
+		return false
+	}
+	panic("Overflow float")
+}
+
+func (v Value) NumMethod() int {
+	// we're sure that it is a struct : check is performed in ToStruct()
+	if v.Type.Kind() == Interface {
+		return v.Type.NoOfIfaceMethods()
+	}
+
+	return lenExportedMethods(v.Type)
+}
+
+func (t *RType) NumMethod() int {
+	if t.Kind() == Interface {
+		return t.NoOfIfaceMethods()
+	}
+
+	return lenExportedMethods(t)
+}
+
+func (t *RType) String() string {
+	return string(t.nomen())
 }

@@ -21,6 +21,7 @@ func convIfaceMeth(p ptr) interface{}           { return *(*interface{ M() })(p)
 func convIface(p ptr) interface{}               { return *(*interface{})(p) }
 func add(p ptr, x uintptr) ptr                  { return ptr(uintptr(p) + x) } // add returns p+x.
 func arrayAt(p ptr, i int, eltSize uintptr) ptr { return add(p, uintptr(i)*eltSize) }
+func loadConvPtr(p ptr, x ptr)                  { *(*ptr)(p) = x }
 
 func lenExportedMethods(t *RType) int {
 	all, ok := methods(t)
@@ -32,7 +33,7 @@ func lenExportedMethods(t *RType) int {
 		methodName := t.nameOffset(method.nameOffset)
 		if methodName.isExported() {
 			if method.typeOffset == 0 {
-				panic("reflect.x.error : method type is zero. Apply fix.")
+				//panic("reflect.x.error : method type is zero. Apply fix.")
 			}
 			count++
 		}
@@ -161,6 +162,81 @@ func appendBitVector(vec *bitVector, bit uint8) {
 	vec.data[vec.num/8] |= bit << (vec.num % 8)
 	vec.num++
 }
+
+// ==============
+// Setters
+// ==============
+func internalNew(t *RType) Value {
+	return Value{Type: t, Ptr: unsafeNew(t), Flag: Flag(t.Kind())&exportFlag | pointerFlag | addressableFlag | Flag(t.Kind())}
+}
+
+// makeInt returns a Value of type t equal to bits (possibly truncated),
+// where t is a signed or unsigned int type.
+func makeInt(f Flag, v uint64, t *RType) Value {
+	ptr := unsafeNew(t)
+	switch t.size {
+	case 1:
+		*(*uint8)(ptr) = uint8(v)
+	case 2:
+		*(*uint16)(ptr) = uint16(v)
+	case 4:
+		*(*uint32)(ptr) = uint32(v)
+	case 8:
+		*(*uint64)(ptr) = v
+	}
+	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+}
+
+// makeFloat returns a Value of type t equal to v (possibly truncated to float32),
+// where t is a float32 or float64 type.
+func makeFloat(f Flag, v float64, t *RType) Value {
+	ptr := unsafeNew(t)
+	switch t.size {
+	case 4:
+		*(*float32)(ptr) = float32(v)
+	case 8:
+		*(*float64)(ptr) = v
+	}
+	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+}
+
+// makeComplex returns a Value of type t equal to v (possibly truncated to complex64),
+// where t is a complex64 or complex128 type.
+func makeComplex(f Flag, v complex128, t *RType) Value {
+	ptr := unsafeNew(t)
+	switch t.size {
+	case 8:
+		*(*complex64)(ptr) = complex64(v)
+	case 16:
+		*(*complex128)(ptr) = v
+	}
+	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+}
+
+func makeString(f Flag, s string, t *RType) Value {
+	ret := internalNew(t)
+	*(*string)(ret.Ptr) = s
+	ret.Flag = ret.Flag&^addressableFlag | f
+	return ret
+}
+
+func makeBytes(f Flag, byt []byte, t *RType) Value {
+	ret := internalNew(t)
+	*(*[]byte)(ret.Ptr) = byt
+	ret.Flag = ret.Flag&^addressableFlag | f
+	return ret
+}
+
+func makeRunes(f Flag, run []rune, t *RType) Value {
+	ret := internalNew(t)
+	*(*[]rune)(ret.Ptr) = run
+	ret.Flag = ret.Flag&^addressableFlag | f
+	return ret
+}
+
+// ==============
+// Others (unused)
+// ==============
 
 func methodName() string {
 	pc, _, line, _ := runtime.Caller(2)

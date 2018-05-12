@@ -6,16 +6,12 @@
 
 package json
 
-import (
-	"reflect"
-)
-
 func (e *InvalidUnmarshalError) Error() string {
 	if e.Type == nil {
 		return "json: Unmarshal(nil)"
 	}
 
-	if e.Type.Kind() != reflect.Ptr {
+	if e.Type.Kind() != Ptr {
 		return "json: Unmarshal(non-pointer " + e.Type.String() + ")"
 	}
 	return "json: Unmarshal(nil " + e.Type.String() + ")"
@@ -25,7 +21,7 @@ func (e *UnmarshalTypeError) Error() string {
 	if len(e.Struct) > 0 || len(e.Field) > 0 {
 		return "json: cannot unmarshal " + e.Value + " into Go struct field " + e.Struct + "." + e.Field + " of type " + e.Type.String()
 	}
-	return "json: cannot unmarshal " + e.Value + " into Go value of type " + e.Type.String()
+	return "json: cannot unmarshal value `" + e.Value + "` into Go value of type " + e.Type.String()
 }
 
 func (e *UnsupportedTypeError) Error() string {

@@ -9,7 +9,6 @@ package json
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"runtime"
 )
 
@@ -125,7 +124,7 @@ func (d *decodeState) unmarshal(v interface{}) (err error) {
 
 	walker := &SetWalker{}
 	if !walker.init(v) {
-		return &InvalidUnmarshalError{reflect.TypeOf(v)}
+		return &InvalidUnmarshalError{TypeOf(v)}
 	}
 
 	d.scan.reset()
@@ -177,20 +176,20 @@ func (d *decodeState) process(walker *SetWalker) {
 		// the first byte (curlOpen) of the object has been read already.
 		// Decoding into nil interface? Switch to non-reflect code.
 		if walker.isIfaceWNoMeths() {
-			walker.Value.Set(reflect.ValueOf(d.objectInterface()))
+			walker.Value.Set(ReflectOn(d.objectInterface()))
 			return
 		}
 
 		switch walker.Value.Kind() {
 		default:
-			d.saveError(&UnmarshalTypeError{Value: "object", Type: walker.Value.Type(), Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "object", Type: walker.Value.Type, Offset: int64(d.offset)})
 			d.offset--
 			d.next() // skip over { } in input
 
-		case reflect.Map:
+		case Map:
 			d.doMap(walker)
 
-		case reflect.Struct:
+		case Struct:
 			d.doStruct(walker)
 		}
 
@@ -218,7 +217,7 @@ func (d *decodeState) process(walker *SetWalker) {
 func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 	if len(item) == 0 {
 		// Empty string given
-		d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type()))
+		d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
 		return
 	}
 
@@ -241,7 +240,7 @@ func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, nullLiteral) {
-			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type()))
+			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
 			break
 		}
 		walker.setNull()
@@ -250,31 +249,31 @@ func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, trueLiteral) && !bytes.Equal(item, falseLiteral) {
-			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type()))
+			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
 			break
 		}
 		err := walker.setBool(boolValue)
 		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "bool", Type: walker.Value.Type(), Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "bool", Type: walker.Value.Type, Offset: int64(d.offset)})
 		}
 
 	case quote: // string
 		s, ok := unquoteBytes(item)
 		if !ok {
-			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type()))
+			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
 		}
 		err := walker.setString(s)
 		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "string", Type: walker.Value.Type(), Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "string", Type: walker.Value.Type, Offset: int64(d.offset)})
 		}
 
 	default: // number
 		if c != minus && (c < zero || c > nine) {
-			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type()))
+			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
 		}
 		err := walker.setNumber(item, d.useNumber)
 		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "number", Type: walker.Value.Type(), Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "number", Type: walker.Value.Type, Offset: int64(d.offset)})
 		}
 	}
 }
@@ -282,15 +281,15 @@ func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 // array consumes an array from d.data[d.off-1:], decoding into the value v. the first byte of the array ('[') has been read already.
 func (d *decodeState) array(walker *SetWalker) {
 	if walker.isIfaceWNoMeths() {
-		walker.Value.Set(reflect.ValueOf(d.arrayInterface()))
+		walker.Value.Set(ReflectOn(d.arrayInterface()))
 		return
 	}
 	// Check type of target.
 	switch walker.Value.Kind() {
-	case reflect.Array: // valid
-	case reflect.Slice: // valid
+	case Array: // valid
+	case Slice: // valid
 	default:
-		d.saveError(&UnmarshalTypeError{Value: "array", Type: walker.Value.Type(), Offset: int64(d.offset)})
+		d.saveError(&UnmarshalTypeError{Value: "array", Type: walker.Value.Type, Offset: int64(d.offset)})
 		d.offset--
 		d.next()
 		return
@@ -310,7 +309,7 @@ func (d *decodeState) array(walker *SetWalker) {
 		d.scan.undo(op)
 
 		if walker.growSlice(i) {
-			d.process(newWalker(reflect.Value{}))
+			d.process(newWalker(Value{}))
 		} else {
 			d.process(newWalker(walker.Value.Index(i)))
 		}
@@ -333,7 +332,7 @@ func (d *decodeState) array(walker *SetWalker) {
 func (d *decodeState) doMap(walker *SetWalker) {
 	ok := walker.startMap()
 	if !ok {
-		d.saveError(&UnmarshalTypeError{Value: "map", Type: walker.Value.Type(), Offset: int64(d.offset)})
+		d.saveError(&UnmarshalTypeError{Value: "map", Type: walker.Value.Type, Offset: int64(d.offset)})
 		d.offset--
 		d.next() // skip over { } in input
 		return
@@ -375,7 +374,7 @@ func (d *decodeState) doMap(walker *SetWalker) {
 		err := walker.loadMapIndex(key)
 		if err != nil {
 			// probably number error, since "Unexpected key type" should NEVER occur
-			d.saveError(&UnmarshalTypeError{Value: "number " + string(key), Type: walker.Value.Type().Key(), Offset: int64(start + 1)})
+			d.saveError(&UnmarshalTypeError{Value: "number " + string(key), Type: walker.Value.Type.ConvToMap().KeyType, Offset: int64(start + 1)})
 		}
 
 		// Next token must be , or }.
@@ -388,40 +387,40 @@ func (d *decodeState) doMap(walker *SetWalker) {
 		}
 	}
 }
-func (d *decodeState) getFieldNamed(value reflect.Value, fieldName []byte) *UnmarshalField {
-	var result *UnmarshalField
+func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField {
+	var result *MarshalField
 
-	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[reflect.Type]unmarshalFields)
-	fields := cachedFields[value.Type()]
+	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+	fields := cachedFields[value.Type]
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = getUnmarshalFields(value)
+		fields = value.Type.getMarshalFields()
 		if fields == nil {
 			//fields = unmarshalFields{}
 			return result
 		}
 
 		unmarshalerFieldCache.mu.Lock()
-		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[reflect.Type]unmarshalFields)
-		newFieldsMap := make(map[reflect.Type]unmarshalFields, len(cachedFields)+1)
+		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+		newFieldsMap := make(map[*RType]*marshalFields, len(cachedFields)+1)
 		for k, v := range cachedFields {
 			newFieldsMap[k] = v
 		}
-		newFieldsMap[value.Type()] = fields
+		newFieldsMap[value.Type] = fields
 		unmarshalerFieldCache.value.Store(newFieldsMap)
 		unmarshalerFieldCache.mu.Unlock()
 	}
 
-	for i := range fields {
-		curField := &fields[i]
-		if bytes.Equal(curField.nameBytes, fieldName) {
-			result = curField
+	for i := range *fields {
+		curField := (*fields)[i]
+		if bytes.Equal(curField.name, fieldName) {
+			result = &curField
 			break
 		}
 		// TODO : equal fold should be searched in a sync.Map by the fieldName -> map[ []byte ] func(srcKey, destKey []byte) bool
-		if result == nil && curField.equalFold(curField.nameBytes, fieldName) {
-			result = curField
+		if result == nil && curField.equalFold(curField.name, fieldName) {
+			result = &curField
 		}
 	}
 	return result
@@ -460,32 +459,32 @@ func (d *decodeState) doStruct(walker *SetWalker) {
 		// extract field
 		curField := d.getFieldNamed(walker.Value, fieldName)
 		// Figure out field corresponding to fieldName.
-		var corespValue reflect.Value
+		var corespValue Value
 		isBasic := false // whether the value is wrapped in a string to be decoded first
 		if curField != nil {
 			corespValue = walker.Value
 			isBasic = curField.isBasic
 			for _, idx := range curField.indexes {
-				if corespValue.Kind() == reflect.Ptr {
+				if corespValue.Kind() == Ptr {
 					if corespValue.IsNil() {
 						// If a struct embeds a pointer to an unexported type, it is not possible to set a newly allocated value since the field is unexported.
 						// See https://golang.org/issue/21357
 						if !corespValue.CanSet() {
-							d.saveError(fmt.Errorf("json: cannot set embedded pointer to unexported struct: %v", corespValue.Type().Elem()))
+							d.saveError(fmt.Errorf("json: cannot set embedded pointer to unexported struct: %v", corespValue.Type.Deref()))
 							// Invalidate corespValue to ensure d.value(corespValue) skips over the JSON value without assigning it to corespValue.
-							corespValue = reflect.Value{}
+							corespValue = Value{}
 							isBasic = false
 							break
 						}
-						corespValue.Set(reflect.New(corespValue.Type().Elem()))
+						corespValue.Set(New(corespValue.Type.Deref()))
 					}
-					corespValue = corespValue.Elem()
+					corespValue = corespValue.Deref()
 				}
 
 				corespValue = corespValue.Field(idx)
 			}
-			d.errorContext.Field = string(curField.nameBytes)
-			d.errorContext.Struct = walker.Value.Type().Name()
+			d.errorContext.Field = string(curField.name)
+			d.errorContext.Struct = walker.Value.Type.Name()
 
 		} else if d.useStrict {
 			d.saveError(fmt.Errorf("json: unknown field %q", fieldName))
@@ -504,7 +503,7 @@ func (d *decodeState) doStruct(walker *SetWalker) {
 				case string:
 					d.literalStore([]byte(v), newWalker(corespValue))
 				default:
-					d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v", corespValue.Type()))
+					d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v", corespValue.Type))
 				}
 			}
 		} else {
@@ -651,7 +650,7 @@ func (d *decodeState) literalInterface() interface{} {
 
 		floa, err := Atof64(item)
 		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "number " + string(item), Type: reflect.TypeOf(0.0), Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "number " + string(item), Type: TypeOf(0.0), Offset: int64(d.offset)})
 		}
 		return floa
 	}

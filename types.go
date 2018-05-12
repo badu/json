@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
@@ -165,17 +164,17 @@ type (
 
 	// An UnmarshalTypeError describes a JSON value that was not appropriate for a value of a specific Go type.
 	UnmarshalTypeError struct {
-		Value  string       // description of JSON value - "bool", "array", "number -5"
-		Type   reflect.Type // type of Go value it could not be assigned to
-		Offset int64        // error occurred after reading Offset bytes
-		Struct string       // name of the struct type containing the field
-		Field  string       // name of the field holding the Go value
+		Value  string // description of JSON value - "bool", "array", "number -5"
+		Type   *RType // type of Go value it could not be assigned to
+		Offset int64  // error occurred after reading Offset bytes
+		Struct string // name of the struct type containing the field
+		Field  string // name of the field holding the Go value
 	}
 
 	// An InvalidUnmarshalError describes an invalid argument passed to Unmarshal.
 	// (The argument to Unmarshal must be a non-nil pointer.)
 	InvalidUnmarshalError struct {
-		Type reflect.Type
+		Type *RType
 	}
 
 	// A Number represents a JSON number literal.
@@ -314,34 +313,21 @@ type (
 	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
 	// A field represents a single field found in a struct.
 	MarshalField struct {
-		indexes  []int
-		name     []byte
-		Type     *RType
-		tag      bool
-		willOmit bool
-		isBasic  bool
+		indexes   []int
+		name      []byte
+		Type      *RType
+		equalFold qualFn // bytes.EqualFold or equivalent
+		tag       bool
+		willOmit  bool
+		isBasic   bool
 	}
 
 	SetWalker struct {
-		reflect.Value
-		mapElem reflect.Value
+		Value
+		mapElem Value
 	}
 
-	qualFn          func(srcKey, destKey []byte) bool
-	unmarshalFields []UnmarshalField // unmarshalFields sorts field by index sequence.
-
-	// A field represents a single field found in a struct.
-	UnmarshalField struct {
-		name      string
-		nameBytes []byte // []byte(name)
-		indexes   []int
-		Type      reflect.Type
-		// TODO : extract equalFold from here and make a sync.Map (@see getFieldNamed of decode_state)
-		equalFold qualFn // bytes.EqualFold or equivalent
-		tag       bool
-		isBasic   bool
-		//willOmit  bool
-	}
+	qualFn func(srcKey, destKey []byte) bool
 )
 
 var (
@@ -349,9 +335,8 @@ var (
 		value atomic.Value // map[*RType]*[]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
-
 	unmarshalerFieldCache struct {
-		value atomic.Value // map[reflect.Type][]field
+		value atomic.Value // map[*RType]*[]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
 	// errPhase is used for errors that should not happen unless
@@ -367,14 +352,12 @@ var (
 	omitTagOption     = []byte("omitempty")
 	allowedRunesInTag = []byte("!#$%&()*+-./:<=>?@[]^_{|}~ ")
 
-	numberType = reflect.TypeOf(Number(""))
-
 	hex = "0123456789abcdef"
 
 	encodeStatePool sync.Pool
 
 	marshalerType               = TypeOf(new(Marshaler)).Deref()
-	unmarshalerType             = reflect.TypeOf(new(Unmarshaler)).Elem()
+	unmarshalerType             = TypeOf(new(Unmarshaler)).Deref()
 	_               Marshaler   = (*RawMessage)(nil)
 	_               Unmarshaler = (*RawMessage)(nil)
 

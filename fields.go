@@ -6,22 +6,6 @@
 
 package json
 
-func (x unmarshalFields) Len() int { return len(x) }
-
-func (x unmarshalFields) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
-
-func (x unmarshalFields) Less(i, j int) bool {
-	for k, xik := range x[i].indexes {
-		if k >= len(x[j].indexes) {
-			return false
-		}
-		if xik != x[j].indexes[k] {
-			return xik < x[j].indexes[k]
-		}
-	}
-	return len(x[i].indexes) < len(x[j].indexes)
-}
-
 func (m marshalFields) Len() int { return len(m) }
 
 func (m marshalFields) Swap(i, j int) { m[i], m[j] = m[j], m[i] }

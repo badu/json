@@ -697,12 +697,13 @@ func (t *RType) getMarshalFields() *marshalFields {
 						}
 					}
 					f := MarshalField{
-						name:     jsonName,
-						tag:      tagged,
-						indexes:  indexes,
-						Type:     fieldType,
-						willOmit: opts.Contains(omitTagOption),
-						isBasic:  isBasic,
+						name:      jsonName,
+						tag:       tagged,
+						indexes:   indexes,
+						Type:      fieldType,
+						willOmit:  opts.Contains(omitTagOption),
+						equalFold: foldFunc(jsonName),
+						isBasic:   isBasic,
 					}
 
 					result = append(result, f)

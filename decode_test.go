@@ -295,7 +295,7 @@ var unmarshalTests = []unmarshalTest{
 	{in: `"g-clef: \uD834\uDD1E"`, ptr: new(string), out: "g-clef: \U0001D11E"},
 	{in: `"invalid: \uD834x\uDD1E"`, ptr: new(string), out: "invalid: \uFFFDx\uFFFD"},
 	{in: "null", ptr: new(interface{}), out: nil},
-	{in: `{"X": [1,2,3], "Y": 4}`, ptr: new(T), out: T{Y: 4}, err: &UnmarshalTypeError{"array", reflect.TypeOf(""), 7, "T", "X"}},
+	{in: `{"X": [1,2,3], "Y": 4}`, ptr: new(T), out: T{Y: 4}, err: &UnmarshalTypeError{"array", TypeOf(""), 7, "T", "X"}},
 	{in: `{"x": 1}`, ptr: new(tx), out: tx{}},
 	{in: `{"x": 1}`, ptr: new(tx), err: fmt.Errorf("json: unknown field \"x\""), disallowUnknownFields: true},
 	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: float64(1), F2: int32(2), F3: Number("3")}},
@@ -394,22 +394,22 @@ var unmarshalTests = []unmarshalTest{
 	{
 		in:  `{"abc":"abc"}`,
 		ptr: new(map[int]string),
-		err: &UnmarshalTypeError{Value: "number abc", Type: reflect.TypeOf(0), Offset: 2},
+		err: &UnmarshalTypeError{Value: "number abc", Type: TypeOf(0), Offset: 2},
 	},
 	{
 		in:  `{"256":"abc"}`,
 		ptr: new(map[uint8]string),
-		err: &UnmarshalTypeError{Value: "number 256", Type: reflect.TypeOf(uint8(0)), Offset: 2},
+		err: &UnmarshalTypeError{Value: "number 256", Type: TypeOf(uint8(0)), Offset: 2},
 	},
 	{
 		in:  `{"128":"abc"}`,
 		ptr: new(map[int8]string),
-		err: &UnmarshalTypeError{Value: "number 128", Type: reflect.TypeOf(int8(0)), Offset: 2},
+		err: &UnmarshalTypeError{Value: "number 128", Type: TypeOf(int8(0)), Offset: 2},
 	},
 	{
 		in:  `{"-1":"abc"}`,
 		ptr: new(map[uint8]string),
-		err: &UnmarshalTypeError{Value: "number -1", Type: reflect.TypeOf(uint8(0)), Offset: 2},
+		err: &UnmarshalTypeError{Value: "number -1", Type: TypeOf(uint8(0)), Offset: 2},
 	},
 
 	// Overwriting of data.
@@ -543,12 +543,12 @@ var unmarshalTests = []unmarshalTest{
 	{
 		in:  `{"2009-11-10T23:00:00Z": "hello world"}`,
 		ptr: &map[Point]string{},
-		err: &UnmarshalTypeError{Value: "map", Type: reflect.TypeOf(map[Point]string{}), Offset: 1},
+		err: &UnmarshalTypeError{Value: "map", Type: TypeOf(map[Point]string{}), Offset: 1},
 	},
 	{
 		in:  `{"asdf": "hello world"}`,
 		ptr: &map[unmarshaler]string{},
-		err: &UnmarshalTypeError{Value: "map", Type: reflect.TypeOf(map[unmarshaler]string{}), Offset: 1},
+		err: &UnmarshalTypeError{Value: "map", Type: TypeOf(map[unmarshaler]string{}), Offset: 1},
 	},
 
 	// related to issue 13783.
@@ -614,7 +614,7 @@ var unmarshalTests = []unmarshalTest{
 			Value:  "string",
 			Struct: "V",
 			Field:  "F2",
-			Type:   reflect.TypeOf(int32(0)),
+			Type:   TypeOf(int32(0)),
 			Offset: 20,
 		},
 	},
@@ -625,7 +625,7 @@ var unmarshalTests = []unmarshalTest{
 			Value:  "string",
 			Struct: "V",
 			Field:  "F2",
-			Type:   reflect.TypeOf(int32(0)),
+			Type:   TypeOf(int32(0)),
 			Offset: 30,
 		},
 	},
@@ -818,7 +818,7 @@ func TestUnmarshal(t *testing.T) {
 			dec.UseStrict()
 		}
 		if err := dec.Decode(v.Interface()); !reflect.DeepEqual(err, tt.err) {
-			t.Errorf("#%d: %v, want %v", i, err, tt.err)
+			t.Errorf("#%d: `%v`, want `%v`", i, err, tt.err)
 			continue
 		} else if err != nil {
 			continue
@@ -1827,7 +1827,7 @@ var invalidUnmarshalTextTests = []struct {
 	{nil, "json: Unmarshal(nil)"},
 	{struct{}{}, "json: Unmarshal(non-pointer struct {})"},
 	{(*int)(nil), "json: Unmarshal(nil *int)"},
-	{new(net.IP), "json: cannot unmarshal number into Go value of type net.IP"},
+	{new(net.IP), "json: cannot unmarshal value `number` into Go value of type net.IP"},
 }
 
 func TestInvalidUnmarshalText(t *testing.T) {
