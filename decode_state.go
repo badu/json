@@ -8,6 +8,7 @@ package json
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"runtime"
 )
@@ -122,20 +123,20 @@ func (d *decodeState) unmarshal(v interface{}) (err error) {
 		}
 	}()
 
-	walker := &SetWalker{}
-	if !walker.init(v) {
+	value := ReflectOn(v)
+	if value.Kind() != Ptr || value.IsNil() {
 		return &InvalidUnmarshalError{TypeOf(v)}
 	}
 
 	d.scan.reset()
 
 	// We decode value not value.Deref because the Unmarshaler interface test must be applied at the top level of the value.
-	d.process(walker)
+	d.process(value)
 	return d.savedError
 }
 
-func (d *decodeState) callUnmarshaller(walker *SetWalker, item []byte) {
-	unmarshaler, _ := walker.Value.Interface().(Unmarshaler)
+func (d *decodeState) callUnmarshaller(value Value, item []byte) {
+	unmarshaler, _ := value.Interface().(Unmarshaler)
 	err := unmarshaler.UnmarshalJSON(item)
 	if err != nil {
 		d.error(err)
@@ -144,8 +145,8 @@ func (d *decodeState) callUnmarshaller(walker *SetWalker, item []byte) {
 
 // value decodes a JSON value from d.data[d.off:] into the value.
 // it updates d.off to point past the decoded value.
-func (d *decodeState) process(walker *SetWalker) {
-	if !walker.Value.IsValid() {
+func (d *decodeState) process(v Value) {
+	if !v.IsValid() {
 		d.doRead()
 		return
 	}
@@ -155,42 +156,45 @@ func (d *decodeState) process(walker *SetWalker) {
 	default:
 		d.error(errPhase)
 	case scanBeginArray:
-		isUnmarshaler := walker.indirect(unmarshalerType, false)
+		isUnmarshaler := false
+		v, isUnmarshaler = indirect(v, false)
 		if isUnmarshaler {
 			d.offset--
-			d.callUnmarshaller(walker, d.next())
+			d.callUnmarshaller(v, d.next())
 			return
 		}
 
-		d.array(walker)
+		d.array(v)
 
 	case scanBeginObject:
-		isUnmarshaler := walker.indirect(unmarshalerType, false)
+		isUnmarshaler := false
+		v, isUnmarshaler = indirect(v, false)
 		if isUnmarshaler {
 			d.offset--
-			d.callUnmarshaller(walker, d.next())
+			d.callUnmarshaller(v, d.next())
 			return
 		}
 
 		// object consumes an object from d.data[d.off-1:], decoding into the value v.
 		// the first byte (curlOpen) of the object has been read already.
 		// Decoding into nil interface? Switch to non-reflect code.
-		if walker.isIfaceWNoMeths() {
-			walker.Value.Set(ReflectOn(d.objectInterface()))
+
+		if v.Kind() == Interface && v.NumMethod() == 0 {
+			v.Set(ReflectOn(d.objectInterface()))
 			return
 		}
 
-		switch walker.Value.Kind() {
+		switch v.Kind() {
 		default:
-			d.saveError(&UnmarshalTypeError{Value: "object", Type: walker.Value.Type, Offset: int64(d.offset)})
+			d.saveError(&UnmarshalTypeError{Value: "object", Type: v.Type, Offset: int64(d.offset)})
 			d.offset--
 			d.next() // skip over { } in input
 
 		case Map:
-			d.doMap(walker)
+			d.doMap(v)
 
 		case Struct:
-			d.doStruct(walker)
+			d.doStruct(v)
 		}
 
 	case scanBeginLiteral:
@@ -208,16 +212,16 @@ func (d *decodeState) process(walker *SetWalker) {
 
 		item := d.data[start:d.offset]
 
-		d.literalStore(item, walker)
+		d.literalStore(item, v)
 	}
 }
 
 // literalStore decodes a literal stored in item into v.
 // fromQuoted indicates whether this literal came from unwrapping a string from the ",string" struct tag option. this is used only to produce more helpful error messages.
-func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
+func (d *decodeState) literalStore(item []byte, v Value) {
 	if len(item) == 0 {
 		// Empty string given
-		d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
+		d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
 		return
 	}
 
@@ -225,13 +229,13 @@ func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 
 	// Check for unmarshaler.
 	if item[0] == nChr { // null
-		isUnmarshaler = walker.indirect(unmarshalerType, true)
+		v, isUnmarshaler = indirect(v, true)
 	} else {
-		isUnmarshaler = walker.indirect(unmarshalerType, false)
+		v, isUnmarshaler = indirect(v, false)
 	}
 
 	if isUnmarshaler {
-		d.callUnmarshaller(walker, item)
+		d.callUnmarshaller(v, item)
 		return
 	}
 
@@ -240,56 +244,202 @@ func (d *decodeState) literalStore(item []byte, walker *SetWalker) {
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, nullLiteral) {
-			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
-			break
+			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			return
 		}
-		walker.setNull()
+		//	setting null.
+		switch v.Kind() {
+		case Interface, Ptr, Map, Slice:
+			v.Set(Zero(v.Type))
+			// otherwise, ignore null for primitives/string
+		}
+
 	case tChr, fChr: // true, false
 		boolValue := item[0] == tChr
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, trueLiteral) && !bytes.Equal(item, falseLiteral) {
-			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
-			break
+			d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			return
 		}
-		err := walker.setBool(boolValue)
-		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "bool", Type: walker.Value.Type, Offset: int64(d.offset)})
+
+		switch v.Kind() {
+		default:
+			d.saveError(&UnmarshalTypeError{Value: "bool", Type: v.Type, Offset: int64(d.offset)})
+			return
+		case Bool:
+			*(*bool)(v.Ptr) = boolValue
+		case Interface:
+			if v.NumMethod() == 0 {
+				v.Set(ReflectOn(boolValue))
+			} else {
+				d.saveError(&UnmarshalTypeError{Value: "bool", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
 		}
 
 	case quote: // string
 		s, ok := unquoteBytes(item)
 		if !ok {
-			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
+			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			return
 		}
-		err := walker.setString(s)
-		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "string", Type: walker.Value.Type, Offset: int64(d.offset)})
+
+		switch v.Kind() {
+		default:
+			d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
+			return
+		case Slice:
+			stringValue := string(s)
+			if v.Type.ConvToSlice().ElemType.Kind() != Uint8 {
+				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			b := make([]byte, base64.StdEncoding.DecodedLen(len(stringValue)))
+			n, err := base64.StdEncoding.Decode(b, s)
+			if err != nil {
+				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			*(*[]byte)(v.Ptr) = b[:n]
+		case String:
+			*(*string)(v.Ptr) = string(s)
+		case Interface:
+			if v.NumMethod() == 0 {
+				stringValue := string(s)
+				v.Set(ReflectOn(stringValue))
+			} else {
+				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
 		}
 
 	default: // number
 		if c != minus && (c < zero || c > nine) {
-			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, walker.Value.Type))
+			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			return
 		}
-		err := walker.setNumber(item, d.useNumber)
-		if err != nil {
-			d.saveError(&UnmarshalTypeError{Value: "number", Type: walker.Value.Type, Offset: int64(d.offset)})
+
+		switch v.Kind() {
+		default:
+			if v.Kind() == String && v.Type == typeOfNo {
+				//println("Yes, typed number, but string")
+				if v.CanSet() {
+					*(*string)(v.Ptr) = string(item)
+				}
+				//TODO: check condition below (unused?)
+				if !IsValidNumber(string(item)) {
+					d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+					return
+				}
+			} else {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+		case Interface:
+			n, err := convertNumber(item, d.useNumber)
+			if err != nil {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			if v.NumMethod() != 0 {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			v.Set(ReflectOn(n))
+		case Int, Int8, Int16, Int32, Int64:
+			result, isNegative := FastNumber(item)
+			if isNegative {
+				result = -result
+			}
+			if v.OverflowInt(int64(result)) {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			// TODO : GLOBAL CanSet should be first condition.
+			if v.CanSet() {
+				switch v.Kind() {
+				case Int8:
+					*(*int8)(v.Ptr) = int8(result)
+				case Int16:
+					*(*int16)(v.Ptr) = int16(result)
+				case Int32:
+					*(*int32)(v.Ptr) = int32(result)
+				case Int64:
+					*(*int64)(v.Ptr) = int64(result)
+				default:
+					*(*int)(v.Ptr) = int(result)
+				}
+			}
+
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			result, isNegative := FastNumber(item)
+			if isNegative {
+				// TODO : make issue on golang github
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+			if v.OverflowUint(result) {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+
+			if v.CanSet() {
+				switch v.Kind() {
+				case Uint8:
+					*(*uint8)(v.Ptr) = uint8(result)
+				case Uint16:
+					*(*uint16)(v.Ptr) = uint16(result)
+				case Uint32:
+					*(*uint32)(v.Ptr) = uint32(result)
+				case Uint64:
+					*(*uint64)(v.Ptr) = uint64(result)
+				case UintPtr:
+					*(*uintptr)(v.Ptr) = uintptr(result)
+				default:
+					*(*uint)(v.Ptr) = uint(result)
+				}
+
+			}
+
+		case Float32:
+			n, err := Atof32(item)
+			if err != nil || v.OverflowFloat(float64(n)) {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+
+			if v.CanSet() {
+				*(*float32)(v.Ptr) = float32(n)
+			}
+
+		case Float64:
+			n, err := Atof64(item)
+			if err != nil || v.OverflowFloat(n) {
+				d.saveError(&UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
+				return
+			}
+
+			if v.CanSet() {
+				*(*float64)(v.Ptr) = n
+			}
 		}
 	}
 }
 
 // array consumes an array from d.data[d.off-1:], decoding into the value v. the first byte of the array ('[') has been read already.
-func (d *decodeState) array(walker *SetWalker) {
-	if walker.isIfaceWNoMeths() {
-		walker.Value.Set(ReflectOn(d.arrayInterface()))
+func (d *decodeState) array(v Value) {
+	//if walker.isIfaceWNoMeths() {
+	if v.Kind() == Interface && v.NumMethod() == 0 {
+		v.Set(ReflectOn(d.arrayInterface()))
 		return
 	}
 	// Check type of target.
-	switch walker.Value.Kind() {
+	switch v.Kind() {
 	case Array: // valid
 	case Slice: // valid
 	default:
-		d.saveError(&UnmarshalTypeError{Value: "array", Type: walker.Value.Type, Offset: int64(d.offset)})
+		d.saveError(&UnmarshalTypeError{Value: "array", Type: v.Type, Offset: int64(d.offset)})
 		d.offset--
 		d.next()
 		return
@@ -308,10 +458,29 @@ func (d *decodeState) array(walker *SetWalker) {
 		d.offset--
 		d.scan.undo(op)
 
-		if walker.growSlice(i) {
-			d.process(newWalker(Value{}))
+		// Get element of array, growing if necessary.
+		if v.Kind() == Slice {
+			// Grow slice if necessary
+			if i >= v.Cap() {
+				newCap := v.Cap() + v.Cap()/2
+				if newCap < 4 {
+					newCap = 4
+				}
+				newSlice := MakeSlice(v.Type, v.Len(), newCap)
+				Copy(newSlice, v)
+				v.Set(newSlice)
+			}
+			if i >= v.Len() {
+				v.SetLen(i + 1)
+			}
+		}
+
+		if i < v.Len() {
+			// Decode into element.
+			d.process(v.Index(i))
 		} else {
-			d.process(newWalker(walker.Value.Index(i)))
+			// Ran out of fixed array: skip.
+			d.process(Value{})
 		}
 
 		i++
@@ -326,17 +495,46 @@ func (d *decodeState) array(walker *SetWalker) {
 		}
 	}
 
-	walker.finishArray(i)
+	if i < v.Len() {
+		switch v.Kind() {
+		case Array:
+			// Array. Zero the rest.
+			zero := Zero(v.Type.ConvToArray().ElemType) //.Elem())
+			for ; i < v.Len(); i++ {
+				v.Index(i).Set(zero)
+			}
+		default:
+			v.SetLen(i)
+		}
+	}
+
+	if i == 0 && v.Kind() == Slice {
+		v.Set(MakeSlice(v.Type, 0, 0))
+	}
+
 }
 
-func (d *decodeState) doMap(walker *SetWalker) {
-	ok := walker.startMap()
-	if !ok {
-		d.saveError(&UnmarshalTypeError{Value: "map", Type: walker.Value.Type, Offset: int64(d.offset)})
+func (d *decodeState) doMap(v Value) {
+	// Map key must either have string kind, have an integer kind
+	// Check type of target: `struct` or `map[T1]T2` where `T1` is string, an integer type
+	mapType := v.Type.ConvToMap()
+	switch mapType.KeyType.Kind() {
+	case String,
+		Int, Int8, Int16, Int32, Int64,
+		Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+	default:
+		d.saveError(&UnmarshalTypeError{Value: "map", Type: v.Type, Offset: int64(d.offset)})
 		d.offset--
 		d.next() // skip over { } in input
 		return
 	}
+
+	if v.IsNil() {
+		v.Set(MakeMap(v.Type))
+	}
+
+	mapElem := New(mapType.ElemType).Deref()
+
 	// fill it out
 	for {
 		// Read opening " of string key or closing }.
@@ -367,14 +565,35 @@ func (d *decodeState) doMap(walker *SetWalker) {
 			d.error(errPhase)
 		}
 
+		if mapElem.IsValid() {
+			mapElem.Set(Zero(v.Type.ConvToMap().ElemType))
+		}
 		// process it
-		d.process(walker.getMapElem())
+		d.process(mapElem)
 
 		// load it
-		err := walker.loadMapIndex(key)
-		if err != nil {
-			// probably number error, since "Unexpected key type" should NEVER occur
-			d.saveError(&UnmarshalTypeError{Value: "number " + string(key), Type: walker.Value.Type.ConvToMap().KeyType, Offset: int64(start + 1)})
+		valueTypeKey := v.Type.ConvToMap().KeyType
+		// Write value back to map; if using struct, corespValue points into struct already.
+		switch valueTypeKey.Kind() {
+		case String:
+			keyValue := ReflectOn(key).Convert(valueTypeKey)
+			v.SetMapIndex(keyValue, mapElem)
+		case Int, Int8, Int16, Int32, Int64:
+			num, err := IntParse(key)
+			if err != nil || Zero(valueTypeKey).OverflowInt(num) {
+				d.saveError(&UnmarshalTypeError{Value: "number " + string(key), Type: valueTypeKey, Offset: int64(start + 1)})
+				return
+			}
+			keyValue := ReflectOn(num).Convert(valueTypeKey)
+			v.SetMapIndex(keyValue, mapElem)
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			num, err := UintParse(key)
+			if err != nil || Zero(valueTypeKey).OverflowUint(num) {
+				d.saveError(&UnmarshalTypeError{Value: "number " + string(key), Type: valueTypeKey, Offset: int64(start + 1)})
+				return
+			}
+			keyValue := ReflectOn(num).Convert(valueTypeKey)
+			v.SetMapIndex(keyValue, mapElem)
 		}
 
 		// Next token must be , or }.
@@ -387,10 +606,11 @@ func (d *decodeState) doMap(walker *SetWalker) {
 		}
 	}
 }
+
 func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField {
 	var result *MarshalField
 
-	cachedFields, _ := unmarshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+	cachedFields, _ := marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
 	fields := cachedFields[value.Type]
 	if fields == nil {
 		// Compute fields without lock.
@@ -401,15 +621,15 @@ func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField
 			return result
 		}
 
-		unmarshalerFieldCache.mu.Lock()
-		cachedFields, _ = unmarshalerFieldCache.value.Load().(map[*RType]*marshalFields)
+		marshalerFieldCache.mu.Lock()
+		cachedFields, _ = marshalerFieldCache.value.Load().(map[*RType]*marshalFields)
 		newFieldsMap := make(map[*RType]*marshalFields, len(cachedFields)+1)
 		for k, v := range cachedFields {
 			newFieldsMap[k] = v
 		}
 		newFieldsMap[value.Type] = fields
-		unmarshalerFieldCache.value.Store(newFieldsMap)
-		unmarshalerFieldCache.mu.Unlock()
+		marshalerFieldCache.value.Store(newFieldsMap)
+		marshalerFieldCache.mu.Unlock()
 	}
 
 	for i := range *fields {
@@ -425,7 +645,8 @@ func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField
 	}
 	return result
 }
-func (d *decodeState) doStruct(walker *SetWalker) {
+
+func (d *decodeState) doStruct(v Value) {
 
 	// fill it out
 	for {
@@ -457,12 +678,12 @@ func (d *decodeState) doStruct(walker *SetWalker) {
 		}
 
 		// extract field
-		curField := d.getFieldNamed(walker.Value, fieldName)
+		curField := d.getFieldNamed(v, fieldName)
 		// Figure out field corresponding to fieldName.
 		var corespValue Value
 		isBasic := false // whether the value is wrapped in a string to be decoded first
 		if curField != nil {
-			corespValue = walker.Value
+			corespValue = v
 			isBasic = curField.isBasic
 			for _, idx := range curField.indexes {
 				if corespValue.Kind() == Ptr {
@@ -484,7 +705,7 @@ func (d *decodeState) doStruct(walker *SetWalker) {
 				corespValue = corespValue.Field(idx)
 			}
 			d.errorContext.Field = string(curField.name)
-			d.errorContext.Struct = walker.Value.Type.Name()
+			d.errorContext.Struct = v.Type.Name()
 
 		} else if d.useStrict {
 			d.saveError(fmt.Errorf("json: unknown field %q", fieldName))
@@ -497,17 +718,22 @@ func (d *decodeState) doStruct(walker *SetWalker) {
 			default:
 				d.saveError(fmt.Errorf("json: should never happen, because we're expecting begin literal, but received operation %d", op))
 			case scanBeginLiteral:
-				switch v := d.literalInterface().(type) {
+				switch va := d.literalInterface().(type) {
 				case nil:
-					newWalker(corespValue).setNull()
+					// setting null to corespValue
+					switch corespValue.Kind() {
+					case Interface, Ptr, Map, Slice:
+						corespValue.Set(Zero(corespValue.Type))
+						// otherwise, ignore null for primitives/string
+					}
 				case string:
-					d.literalStore([]byte(v), newWalker(corespValue))
+					d.literalStore([]byte(va), corespValue)
 				default:
 					d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v", corespValue.Type))
 				}
 			}
 		} else {
-			d.process(newWalker(corespValue))
+			d.process(corespValue)
 		}
 
 		// Next token must be , or }.

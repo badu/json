@@ -239,7 +239,7 @@ func makeRunes(f Flag, run []rune, t *RType) Value {
 // ==============
 
 func methodName() string {
-	pc, _, line, _ := runtime.Caller(2)
+	pc, _, line, _ := runtime.Caller(3)
 	f := runtime.FuncForPC(pc)
 	if f == nil {
 		return "unknown method"

@@ -322,20 +322,11 @@ type (
 		isBasic   bool
 	}
 
-	SetWalker struct {
-		Value
-		mapElem Value
-	}
-
 	qualFn func(srcKey, destKey []byte) bool
 )
 
 var (
 	marshalerFieldCache struct {
-		value atomic.Value // map[*RType]*[]MarshalField
-		mu    sync.Mutex   // used only by writers
-	}
-	unmarshalerFieldCache struct {
 		value atomic.Value // map[*RType]*[]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}

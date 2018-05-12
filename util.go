@@ -8,6 +8,7 @@ package json
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -252,230 +253,6 @@ func isValidTagNew(tag []byte) bool {
 	return true
 }
 
-/**
-func isValidTag(tag string) bool {
-	if len(tag) == 0 {
-		return false
-	}
-	for _, c := range tag {
-		switch {
-		case strings.ContainsRune("!#$%&()*+-./:<=>?@[]^_{|}~ ", c):
-			// Backslash and quote chars are reserved, but
-			// otherwise any punctuation chars are allowed
-			// in a tag name.
-		default:
-			if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// getUnmarshalFields returns a list of fields that JSON should recognize for the given type.
-// The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-
-func getUnmarshalFields(value reflect.Value) unmarshalFields {
-	// Embedded fields to explore at the current level and the next.
-	fields := unmarshalFields{}
-	next := unmarshalFields{{Type: value.Type()}}
-
-	// Count of queued names for current level and the next.
-	count := map[reflect.Type]int{}
-	nextCount := map[reflect.Type]int{}
-
-	// Types already visited at an earlier level.
-	visited := map[reflect.Type]bool{}
-
-	// Fields found.
-	var result unmarshalFields
-
-	for len(next) > 0 {
-		fields, next = next, fields[:0]
-		count, nextCount = nextCount, map[reflect.Type]int{}
-
-		for _, curField := range fields {
-			if visited[curField.Type] {
-				continue
-			}
-			visited[curField.Type] = true
-
-			// Scan curField.Type for fields to include.
-			for i := 0; i < curField.Type.NumField(); i++ {
-				structField := curField.Type.Field(i)
-				isNonExported := len(structField.PkgPath) > 0
-				if structField.Anonymous {
-					typ := structField.Type
-					if typ.Kind() == reflect.Ptr {
-						typ = typ.Elem()
-					}
-					if isNonExported && typ.Kind() != reflect.Struct {
-						// Ignore embedded fields of unexported non-struct types.
-						continue
-					}
-					// Do not ignore embedded fields of unexported struct types since they may have exported fields.
-				} else if isNonExported {
-					// Ignore unexported non-embedded fields.
-					continue
-				}
-
-				// start processing tags
-				tag := structField.Tag.Get("json")
-				if tag == "-" {
-					continue
-				}
-
-				name, opts := parseTag(tag)
-				if !isValidTag(name) {
-					name = ""
-				}
-
-				indexes := make([]int, len(curField.indexes)+1)
-				copy(indexes, curField.indexes)
-				indexes[len(curField.indexes)] = i
-
-				fieldType := structField.Type
-
-				if len(fieldType.Name()) == 0 && fieldType.Kind() == reflect.Ptr {
-					// Follow pointer.
-					fieldType = fieldType.Elem()
-				}
-
-				fieldKind := fieldType.Kind()
-
-				// Record found field and index sequence.
-				if len(name) > 0 || !structField.Anonymous || fieldKind != reflect.Struct {
-					tagged := len(name) > 0
-					if len(name) == 0 {
-						name = structField.Name
-					}
-
-					// Only strings, floats, integers, and booleans implies isBasic.
-					isBasic := false
-					if opts.Contains("string") {
-						switch fieldKind {
-						case reflect.Bool,
-							reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-							reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-							reflect.Float32, reflect.Float64,
-							reflect.String:
-							isBasic = true
-						}
-					}
-
-					f := UnmarshalField{
-						name:    name,
-						tag:     tagged,
-						indexes: indexes,
-						Type:    fieldType,
-						//willOmit: opts.Contains(omitTagOption),
-						isBasic: isBasic,
-					}
-					f.nameBytes = []byte(f.name)
-					f.equalFold = foldFunc(f.nameBytes)
-
-					result = append(result, f)
-					if count[curField.Type] > 1 {
-						// If there were multiple instances, add a second, so that the annihilation code will see a duplicate.
-						// It only cares about the distinction between 1 or 2, so don't bother generating any more copies.
-						result = append(result, result[len(result)-1])
-					}
-					continue
-				}
-
-				// Record new anonymous struct to explore in next round.
-				nextCount[fieldType]++
-				if nextCount[fieldType] == 1 {
-					//println("Recording.")
-					f := UnmarshalField{name: fieldType.Name(), indexes: indexes, Type: fieldType}
-					f.nameBytes = []byte(f.name)
-					f.equalFold = foldFunc(f.nameBytes)
-
-					next = append(next, f)
-				}
-			}
-		}
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		x := result
-		// sort field by name, breaking ties with depth, then breaking ties with "name came from json tag", then breaking ties with index sequence.
-		if x[i].name != x[j].name {
-			return x[i].name < x[j].name
-		}
-		if len(x[i].indexes) != len(x[j].indexes) {
-			return len(x[i].indexes) < len(x[j].indexes)
-		}
-		if x[i].tag != x[j].tag {
-			return x[i].tag
-		}
-		return unmarshalFields(x).Less(i, j)
-	})
-
-	// Delete all fields that are hidden by the Go rules for embedded fields, except that fields with JSON tags are promoted.
-
-	// The fields are sorted in primary order of name, secondary order of field index length. Loop over names; for each name, delete hidden fields by choosing the one dominant field that survives.
-	out := result[:0]
-	for advance, i := 0, 0; i < len(result); i += advance {
-		// One iteration per name. Find the sequence of fields with the name of this first field.
-		fi := result[i]
-		name := fi.name
-		for advance = 1; i+advance < len(result); advance++ {
-			fj := result[i+advance]
-			if fj.name != name {
-				break
-			}
-		}
-		if advance == 1 { // Only one field with this name
-			out = append(out, fi)
-			continue
-		}
-		dominant, ok := dominantField(result[i : i+advance])
-		if ok {
-			out = append(out, dominant)
-		}
-	}
-
-	result = out
-	sort.Sort(unmarshalFields(result))
-
-	return result
-}
-
-// dominantField looks through the fields, all of which are known to have the same name, to find the single field that dominates the others using Go's embedding rules, modified by the presence of JSON tags.
-// If there are multiple top-level fields, the boolean will be false: This condition is an error in Go and we skip all the fields.
-func dominantField(fields unmarshalFields) (UnmarshalField, bool) {
-	// The fields are sorted in increasing index-length order. The winner
-	// must therefore be one with the shortest index length. Drop all
-	// longer entries, which is easy: just truncate the slice.
-	length := len(fields[0].indexes)
-	tagged := -1 // Index of first tagged field.
-	for i, f := range fields {
-		if len(f.indexes) > length {
-			fields = fields[:i]
-			break
-		}
-		if f.tag {
-			if tagged >= 0 {
-				// Multiple tagged fields at the same level: conflict.
-				// Return no field.
-				return UnmarshalField{}, false
-			}
-			tagged = i
-		}
-	}
-	if tagged >= 0 {
-		return fields[tagged], true
-	}
-	// All remaining fields have the same length. If there's more than one,
-	// we have a conflict (two fields named "X" at the same level) and we
-	// return no field.
-	if len(fields) > 1 {
-		return UnmarshalField{}, false
-	}
-	return fields[0], true
-}
-**/
 // parseTag splits a struct field's json tag into its name and comma-separated options.
 func parseTagNew(tag []byte) ([]byte, tagOptionsByte) {
 	if idx := bytes.IndexByte(tag, comma); idx != -1 {
@@ -684,4 +461,58 @@ func quoteChar(c byte) string {
 	// use isBasic string with different quotation marks
 
 	return "'" + string(c) + "'"
+}
+
+// indirect walks down v allocating pointers as needed, until it gets to a non-pointer.
+// if it encounters an Unmarshaler, indirect stops and returns that.
+// if decodingNull is true, indirect stops at the last pointer so it can be set to nil.
+func indirect(v Value, decodingNull bool) (Value, bool) {
+	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
+	if v.Kind() != Ptr && v.Type.Name() != "" && v.CanAddr() {
+		v = v.Addr()
+	}
+	for {
+		// Load value from interface, but only if the result will be
+		// usefully addressable.
+		if v.Kind() == Interface && !v.IsNil() {
+			e := v.Iface() // .Elem()
+			if e.Kind() == Ptr && !e.IsNil() && (!decodingNull || e.Deref().Kind() == Ptr) {
+				v = e
+				continue
+			}
+		}
+
+		if v.Kind() != Ptr {
+			break
+		}
+
+		// now v.Kind() == Ptr
+		if v.Deref().Kind() != Ptr && decodingNull && v.CanSet() {
+			break
+		}
+
+		if v.IsNil() {
+			v.Set(New(v.Type.Deref()))
+		}
+
+		if v.Type.NumMethod() > 0 {
+			if v.Type.Implements(unmarshalerType) {
+				return v, true
+			}
+		}
+
+		v = v.Deref()
+	}
+	return v, false
+}
+
+func convertNumber(from []byte, useNumber bool) (interface{}, error) {
+	if useNumber {
+		return Number(string(from)), nil
+	}
+	f, err := Atof64(from)
+	if err != nil {
+		return nil, fmt.Errorf("invalid number") //&UnmarshalTypeError{Value: "number " + string(from), Type: TypeOf(0.0), Offset: int64(d.offset)}
+	}
+	return f, nil
 }
