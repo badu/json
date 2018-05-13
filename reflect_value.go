@@ -30,7 +30,7 @@ func (t *RType) hasInfoFlag() bool                { return t.extraTypeFlag&hasEx
 func (t *RType) NoOfIfaceMethods() int            { return len(t.ifaceMethods()) }
 func (t *RType) ifaceMethods() []ifaceMethod      { return t.convToIface().methods }
 func (t *RType) isAnon() bool                     { return t.extraTypeFlag&hasNameFlag == 0 }
-func (t *RType) hasName() bool                    { return !t.isAnon() && len(t.nameOffsetStr().name()) > 0 }
+func (t *RType) hasName() bool                    { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
 
 func (t *RType) pkg() (int32, bool) {
 	if !t.hasInfoFlag() {
@@ -94,35 +94,16 @@ func (t *RType) nomen() []byte {
 	}
 	return s
 }
-func (t *RType) Fields(inspect InspectTypeFn) {
-	if t.Kind() != Struct {
-		panic("Not struct")
-		return
-	}
-	structType := t.convToStruct()
-	for i := range structType.fields {
-		field := &structType.fields[i]
-		var PkgPath []byte
-		if !field.name.isExported() {
-			PkgPath = structType.pkgPath.name()
-		}
-		var Tag []byte
-		if tag := field.name.tag(); len(tag) > 0 {
-			Tag = tag
-		}
-		inspect(field.Type, field.name.name(), Tag, PkgPath, isEmbedded(field), field.name.isExported(), structFieldOffset(field), i)
-	}
-}
 
-func (t *RType) PkgPath() string {
+func (t *RType) pkgPathLen() int {
 	if t.isAnon() {
-		return ""
+		return 0
 	}
 	pk, ok := t.pkg()
 	if !ok {
-		return ""
+		return 0
 	}
-	return string(t.nameOffset(pk).name())
+	return t.nameOffset(pk).nameLen()
 }
 
 func (t *RType) Name() string {
@@ -281,6 +262,7 @@ func (t *RType) Implements(u *RType) bool {
 	}
 	return t.implements(u)
 }
+
 func (t *RType) implements(dest *RType) bool {
 	if dest.Kind() != Interface {
 		return false
@@ -430,12 +412,14 @@ func (v Value) Interface() interface{} {
 	}
 	return v.valueInterface()
 }
+
 func (v Value) Addr() Value {
 	if !v.CanAddr() {
 		panic("reflect.Value.Addr: called on a NON addressable value")
 	}
 	return Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
 }
+
 func (v Value) ro() Flag {
 	if !v.isExported() {
 		return stickyROFlag
@@ -778,7 +762,8 @@ func (v Value) Field(i int) Value {
 	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(typ.Kind())
 	// Using an unexported field forces exportFlag.
 	if !field.name.isExported() {
-		if isEmbedded(field) {
+		// is embedded ?
+		if field.offsetEmbed&1 != 0 {
 			fl |= embedROFlag
 		} else {
 			fl |= stickyROFlag
@@ -945,7 +930,7 @@ func (v Value) Convert(dst *RType) Value {
 		}
 	case String:
 		sliceElem := dst.ConvToSlice().ElemType
-		if destKind == Slice && len(sliceElem.PkgPath()) == 0 {
+		if destKind == Slice && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
 				return v.cvtStringBytes(dst)
@@ -955,7 +940,7 @@ func (v Value) Convert(dst *RType) Value {
 		}
 	case Slice:
 		sliceElem := t.ConvToSlice().ElemType
-		if destKind == String && len(sliceElem.PkgPath()) == 0 {
+		if destKind == String && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
 				return v.cvtBytesString(dst)

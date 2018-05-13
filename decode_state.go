@@ -613,7 +613,7 @@ func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = getMarshalFields(value.Type)
+		fields = value.Type.getMarshalFields()
 		if fields == nil {
 			//fields = unmarshalFields{}
 			return nil
@@ -629,6 +629,7 @@ func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField
 		fieldsCache.value.Store(newFieldsMap)
 		fieldsCache.mu.Unlock()
 	}
+
 	var result *MarshalField
 	for i := range fields {
 		curField := &fields[i]

@@ -910,17 +910,17 @@ func TestMarshalRawMessageValue(t *testing.T) {
 }
 
 func TestTagParsing(t *testing.T) {
-	name, opts := parseTag("field,foobar,foo")
-	if name != "field" {
+	name, opts := parseTag([]byte("field,foobar,foo"))
+	if !bytes.Equal(name, []byte("field")) {
 		t.Fatalf("name = %q, want field", name)
 	}
 	for _, tt := range []struct {
-		opt  string
+		opt  []byte
 		want bool
 	}{
-		{"foobar", true},
-		{"foo", true},
-		{"bar", false},
+		{[]byte("foobar"), true},
+		{[]byte("foo"), true},
+		{[]byte("bar"), false},
 	} {
 		if opts.Contains(tt.opt) != tt.want {
 			t.Errorf("Contains(%q) = %v", tt.opt, !tt.want)
@@ -1236,4 +1236,5 @@ func TestNewNull(t *testing.T) {
 	if string(result) != expect {
 		t.Errorf(" got\n%s\nwant\n%s", string(result), expect)
 	}
+	t.Logf("Result : %s", string(result))
 }

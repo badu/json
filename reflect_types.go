@@ -422,16 +422,6 @@ type (
 		ptrToThis     typeOff   // type for pointer to this type, may be zero
 	}
 
-	// The first two words of this type must be kept in sync with makeFuncImpl and runtime.reflectMethodValue.
-	// Any changes should be reflected in all three.
-	// (COMPILER ???)
-	methodValue struct {
-		fnUintPtr uintptr
-		stack     *bitVector
-		method    int
-		rcvrVal   Value
-	}
-
 	// Value is the reflection interface to a Go value.
 	//
 	// Not all methods apply to all kinds of values. Restrictions,
@@ -463,10 +453,6 @@ type (
 		// functions), and the top bits of the flag give the method number
 		// in r's type's method table.
 	}
-
-	InspectTypeFn   func(typ *RType, name []byte, tag []byte, pack []byte, embedded, exported bool, offset uintptr, index int)
-	InspectValueFn  func(typ *RType, name []byte, tag []byte, pack []byte, embedded, exported bool, offset uintptr, index int, valPtr unsafe.Pointer)
-	MethodInspectFn func(name []byte, index int, flag Flag, inParams, outParams []*RType)
 )
 
 func init() {

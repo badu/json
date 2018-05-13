@@ -183,7 +183,6 @@ type (
 	// An encodeState encodes JSON into a bytes.Buffer.
 	encodeState struct {
 		bytes.Buffer // accumulated output
-		scratch      [64]byte
 		opts         encOpts
 	}
 
@@ -296,9 +295,7 @@ type (
 
 	// tagOptions is the string following a comma in a struct field's "json"
 	// tag, or the empty string. It does not include the leading comma.
-	tagOptions string
-
-	tagOptionsByte []byte
+	tagOptions []byte
 	/**
 	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
 	The documentation states :
@@ -315,12 +312,16 @@ type (
 	MarshalField struct {
 		indexes       []int
 		name          []byte
-		Type          *RType
 		equalFold     qualFn // bytes.EqualFold or equivalent
 		tag           bool
 		willOmit      bool
 		isBasic       bool
 		isNullSuspect bool
+	}
+
+	visitField struct {
+		Type    *RType
+		indexes []int
 	}
 
 	qualFn func(srcKey, destKey []byte) bool

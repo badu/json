@@ -50,7 +50,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendInt(walker.scratch[:0], int64(*(*int)(v.Ptr))))
+		walker.Write(FormatInt(int64(*(*int)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -58,7 +58,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendInt(walker.scratch[:0], int64(*(*int8)(v.Ptr))))
+		walker.Write(FormatInt(int64(*(*int8)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -66,7 +66,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendInt(walker.scratch[:0], int64(*(*int16)(v.Ptr))))
+		walker.Write(FormatInt(int64(*(*int16)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -74,7 +74,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendInt(walker.scratch[:0], int64(*(*int32)(v.Ptr))))
+		walker.Write(FormatInt(int64(*(*int32)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -82,7 +82,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendInt(walker.scratch[:0], *(*int64)(v.Ptr)))
+		walker.Write(FormatInt(*(*int64)(v.Ptr)))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -90,7 +90,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], uint64(*(*uint)(v.Ptr))))
+		walker.Write(FormatUint(uint64(*(*uint)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -98,7 +98,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], uint64(*(*uint8)(v.Ptr))))
+		walker.Write(FormatUint(uint64(*(*uint8)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -106,7 +106,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], uint64(*(*uint16)(v.Ptr))))
+		walker.Write(FormatUint(uint64(*(*uint16)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -114,7 +114,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], uint64(*(*uint32)(v.Ptr))))
+		walker.Write(FormatUint(uint64(*(*uint32)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -122,7 +122,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], *(*uint64)(v.Ptr)))
+		walker.Write(FormatUint(*(*uint64)(v.Ptr)))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -130,7 +130,7 @@ func (v Value) write(walker *encodeState) bool {
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
-		walker.Write(AppendUint(walker.scratch[:0], uint64(*(*uintptr)(v.Ptr))))
+		walker.Write(FormatUint(uint64(*(*uintptr)(v.Ptr))))
 		if walker.opts.quoted {
 			walker.WriteByte(quote)
 		}
@@ -144,7 +144,7 @@ func (v Value) write(walker *encodeState) bool {
 		// This matches most other JSON generators.
 		// See golang.org/issue/6384 and golang.org/issue/14135.
 		// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-		b := walker.scratch[:0]
+		var b []byte
 		abs := math.Abs(value)
 		fmt := fChr
 		// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
@@ -181,7 +181,7 @@ func (v Value) write(walker *encodeState) bool {
 		// This matches most other JSON generators.
 		// See golang.org/issue/6384 and golang.org/issue/14135.
 		// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-		b := walker.scratch[:0]
+		var b []byte
 		abs := math.Abs(value)
 		fmt := fChr
 		if abs != 0 {
@@ -347,7 +347,7 @@ func (v Value) structEncoder(walker *encodeState) {
 	if fieldsInfo == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fieldsInfo = getMarshalFields(v.Type)
+		fieldsInfo = v.Type.getMarshalFields()
 		if fieldsInfo != nil {
 			fieldsCache.mu.Lock()
 			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
@@ -368,13 +368,13 @@ func (v Value) structEncoder(walker *encodeState) {
 	walker.WriteByte(curlOpen)
 
 	first := true
-	for _, f := range fieldsInfo {
+	for _, curField := range fieldsInfo {
 		// restoring to original value type, since it gets altered below
 		valueType := v.Type
 
 		fieldValue := v
 
-		for _, idx := range f.indexes {
+		for _, idx := range curField.indexes {
 			if valueType.Kind() == Ptr {
 				valueType = valueType.Deref()
 				if fieldValue.IsNil() {
@@ -391,21 +391,19 @@ func (v Value) structEncoder(walker *encodeState) {
 			continue
 		}
 
-		if fieldValue.isEmptyValue() {
-			if f.willOmit {
-				continue
-			}
+		if fieldValue.isEmptyValue() && curField.willOmit {
+			continue
 		}
 
 		// Serialize Nulls Condition : 1. is a struct which has a name that starts with "Null" and must have "omitempty"
-		if f.isNullSuspect {
+		if curField.isNullSuspect {
 			cachedFields2, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
 			subFields := cachedFields2[fieldValue.Type]
 			if subFields == nil {
 
 				// Compute fields without lock.
 				// Might duplicate effort but won't hold other computations back.
-				subFields = getMarshalFields(fieldValue.Type)
+				subFields = fieldValue.Type.getMarshalFields()
 				if subFields != nil {
 					// store them
 					fieldsCache.mu.Lock()
@@ -468,9 +466,9 @@ func (v Value) structEncoder(walker *encodeState) {
 							if !first {
 								walker.WriteByte(comma)
 							}
-							walker.stringBytes(f.name)
+							walker.stringBytes(curField.name)
 							walker.WriteByte(colon)
-							walker.opts.quoted = f.isBasic
+							walker.opts.quoted = curField.isBasic
 							carrierField.write(walker)
 						}
 						continue
@@ -491,9 +489,9 @@ func (v Value) structEncoder(walker *encodeState) {
 		if !first {
 			walker.WriteByte(comma)
 		}
-		walker.stringBytes(f.name)
+		walker.stringBytes(curField.name)
 		walker.WriteByte(colon)
-		walker.opts.quoted = f.isBasic
+		walker.opts.quoted = curField.isBasic
 		fieldValue.walk(walker)
 		if first {
 			first = false
@@ -605,10 +603,10 @@ func (v Value) mapEncoder(walker *encodeState) {
 
 // getMarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func getMarshalFields(t *RType) marshalFields {
+func (t *RType) getMarshalFields() marshalFields {
 	// Embedded fields to explore at the current level and the next.
-	fields := marshalFields{}
-	next := marshalFields{{Type: t}}
+	var fields []visitField
+	next := []visitField{{Type: t}}
 
 	// Count of queued names for current level and the next.
 	count := map[*RType]int{}
@@ -620,7 +618,6 @@ func getMarshalFields(t *RType) marshalFields {
 	// Fields found.
 	var result marshalFields
 
-	//println("Start.")
 	for len(next) > 0 {
 		fields, next = next, fields[:0]
 		count, nextCount = nextCount, map[*RType]int{}
@@ -632,61 +629,60 @@ func getMarshalFields(t *RType) marshalFields {
 			visited[curField.Type] = true
 
 			// Scan curField.Type for fields to include.
-			curField.Type.Fields(func(Type *RType, fName []byte, fTag []byte, pack []byte, embedded, exported bool, offset uintptr, index int) {
-				//structField := curField.Type.Field(i)
-				isNonExported := len(pack) > 0
+			curStruct := (*structType)(ptr(curField.Type))
+			for index := range curStruct.fields {
+				field := &curStruct.fields[index]
+				fieldType := field.Type
+
+				embedded := field.offsetEmbed&1 != 0
+				isNotExported := false
+				if !field.name.isExported() {
+					isNotExported = curStruct.pkgPath.nameLen() > 0
+				}
 				if embedded {
-					typ := Type
-					if typ.Kind() == Ptr {
-						typ = typ.Deref()
+					if fieldType.Kind() == Ptr {
+						// Follow pointer.
+						fieldType = fieldType.Deref()
 					}
-					if isNonExported && typ.Kind() != Struct {
+					if isNotExported && fieldType.Kind() != Struct {
 						// Ignore embedded fields of unexported non-struct types.
-						//continue
-						return
+						continue
 					}
 					// Do not ignore embedded fields of unexported struct types since they may have exported fields.
-				} else if isNonExported {
+				} else if isNotExported {
 					// Ignore unexported non-embedded fields.
-					//continue
-					return
+					continue
 				}
 
 				// start processing tags
-				tag := GetTagNamed(fTag, jsonTagName) //structField.Tag.Get(jsonTagName)
-
+				tag := tagLookup(field.name.tag(), jsonTagName)
+				// ignored
 				if idx := bytes.IndexByte(tag, minus); idx != -1 {
-					//if bytes.Equal(tag, ignoreOption) {
-					//continue
-					return
+					continue
 				}
-				//println(string(fName) + " TAG : " + string(tag) + " out of " + string(fTag))
-				jsonName, opts := parseTagNew(tag)
-				if !isValidTagNew(jsonName) {
-					//println(string(fName) + " Invalid tag : `" + string(tag) + "` `" + string(jsonName) + "`")
-					// TODO : signal error as warning or something
-					jsonName = []byte{} //""
+
+				jsonName, opts := parseTag(tag)
+				if !isValidTag(jsonName) {
+					// TODO : signal error as warning
+					jsonName = []byte{}
 				}
 
 				indexes := make([]int, len(curField.indexes)+1)
 				copy(indexes, curField.indexes)
 				indexes[len(curField.indexes)] = index
 
-				fieldType := Type
+				fieldType = field.Type
 
 				if len(fieldType.Name()) == 0 && fieldType.Kind() == Ptr {
 					// Follow pointer.
 					fieldType = fieldType.Deref()
 				}
 
-				fieldKind := fieldType.Kind()
+				fieldKind := Kind(fieldType.kind & kindMask)
 
+				tagged := len(jsonName) > 0
 				// Record found field and index sequence.
-				if len(jsonName) > 0 || !embedded || fieldKind != Struct {
-					tagged := len(jsonName) > 0
-					if len(jsonName) == 0 {
-						jsonName = fName
-					}
+				if tagged || !embedded || fieldKind != Struct {
 					// Only strings, floats, integers, and booleans implies isBasic.
 					isBasic := false
 					if opts.Contains(stringTagOption) {
@@ -697,13 +693,17 @@ func getMarshalFields(t *RType) marshalFields {
 					}
 					willBeOmitted := opts.Contains(omitTagOption)
 					f := MarshalField{
-						name:      jsonName,
 						tag:       tagged,
 						indexes:   indexes,
-						Type:      fieldType,
 						equalFold: foldFunc(jsonName),
 						isBasic:   isBasic,
 						willOmit:  willBeOmitted,
+					}
+
+					if !tagged {
+						f.name = field.name.name()
+					} else {
+						f.name = jsonName
 					}
 
 					if strings.HasPrefix(fieldType.Name(), "Null") && fieldKind == Struct && willBeOmitted {
@@ -717,18 +717,16 @@ func getMarshalFields(t *RType) marshalFields {
 						// It only cares about the distinction between 1 or 2, so don't bother generating any more copies.
 						result = append(result, result[len(result)-1])
 					}
-					//continue
-					return
+					continue
 				}
 
 				// Record new anonymous struct to explore in next round.
 				nextCount[fieldType]++
 				if nextCount[fieldType] == 1 {
-					f := MarshalField{name: []byte(fieldType.Name()), indexes: indexes, Type: fieldType}
+					f := visitField{indexes: indexes, Type: fieldType}
 					next = append(next, f)
 				}
-			})
-
+			}
 		}
 	}
 
@@ -758,10 +756,9 @@ func getMarshalFields(t *RType) marshalFields {
 	for advance, i := 0, 0; i < len(result); i += advance {
 		// One iteration per name. Find the sequence of fields with the name of this first field.
 		fi := result[i]
-		name := fi.name
 		for advance = 1; i+advance < len(result); advance++ {
 			fj := result[i+advance]
-			if !bytes.Equal(fj.name, name) {
+			if !bytes.Equal(fj.name, fi.name) {
 				break
 			}
 		}

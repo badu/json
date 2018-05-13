@@ -361,32 +361,54 @@ func NewSmallPayload() *SmallPayload {
 	}
 }
 
-func BenchmarkOldUnmarshalMedium(b *testing.B) {
+func _BenchmarkOldUnmarshalLarge(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var data = LargePayload{}
+		json.Unmarshal(LargeFixture, &data)
+	}
+}
+
+func _BenchmarkNewUnmarshalLarge(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var data = LargePayload{}
+		Unmarshal(LargeFixture, &data)
+	}
+}
+
+func _BenchmarkOldUnmarshalMedium(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var data = MediumPayload{}
 		json.Unmarshal(MediumFixture, &data)
 	}
 }
 
-func BenchmarkNewUnmarshalMedium(b *testing.B) {
+func _BenchmarkNewUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var data = MediumPayload{}
 		Unmarshal(MediumFixture, &data)
 	}
 }
 
-func BenchmarkOldUnmarshalSmall(b *testing.B) {
+func _BenchmarkOldUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		result := SmallPayload{}
 		json.Unmarshal(SmallFixture, &result)
 	}
 }
 
-func BenchmarkNewUnmarshalSmall(b *testing.B) {
+func _BenchmarkNewUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		result := SmallPayload{}
 		Unmarshal(SmallFixture, &result)
@@ -395,14 +417,17 @@ func BenchmarkNewUnmarshalSmall(b *testing.B) {
 
 func BenchmarkOldMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewLargePayload()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
+
 func BenchmarkNewMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewLargePayload()); err != nil {
 			b.Fatal(err)
@@ -410,16 +435,19 @@ func BenchmarkNewMarshalLarge(b *testing.B) {
 	}
 }
 
-func BenchmarkOldMarshalMedium(b *testing.B) {
+func _BenchmarkOldMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewMediumPayload()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-func BenchmarkNewMarshalMedium(b *testing.B) {
+
+func _BenchmarkNewMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewMediumPayload()); err != nil {
 			b.Fatal(err)
@@ -427,16 +455,19 @@ func BenchmarkNewMarshalMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkOldMarshalSmall(b *testing.B) {
+func _BenchmarkOldMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(NewSmallPayload()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-func BenchmarkNewMarshalSmall(b *testing.B) {
+
+func _BenchmarkNewMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewSmallPayload()); err != nil {
 			b.Fatal(err)

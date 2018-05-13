@@ -9,7 +9,6 @@ package json
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -225,49 +224,6 @@ func newEncodeState() *encodeState {
 		return e
 	}
 	return new(encodeState)
-}
-
-func isValidTagNew(tag []byte) bool {
-	if len(tag) == 0 {
-		return false
-	}
-	b := tag
-	for len(b) > 0 {
-		r, size := utf8.DecodeRune(b)
-		//fmt.Printf("%c %v\n", r, size)
-
-		switch {
-		//TODO : can do better than this
-		case bytes.ContainsRune(allowedRunesInTag, r):
-			//case strings.ContainsRune("!#$%&()*+-./:<=>?@[]^_{|}~ ", c):
-			// Backslash and quote chars are reserved, but otherwise any punctuation chars are allowed in a tag name.
-		default:
-			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-				return false
-			}
-		}
-
-		b = b[size:]
-
-	}
-	return true
-}
-
-// parseTag splits a struct field's json tag into its name and comma-separated options.
-func parseTagNew(tag []byte) ([]byte, tagOptionsByte) {
-	if idx := bytes.IndexByte(tag, comma); idx != -1 {
-		//println("Comma Index : " + FormatInt(int64(idx))+" `"+string(tag[idx+1:])+"`")
-		return tag[:idx], tag[idx+1:]
-	}
-	return tag, tagOptionsByte{}
-}
-
-// parseTag splits a struct field's json tag into its name and comma-separated options.
-func parseTag(tag string) (string, tagOptions) {
-	if idx := strings.IndexByte(tag, comma); idx != -1 {
-		return tag[:idx], tagOptions(tag[idx+1:])
-	}
-	return tag, tagOptions("")
 }
 
 // foldFunc returns one of four different case folding equivalence functions, from most general (and slow) to fastest:

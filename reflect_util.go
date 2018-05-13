@@ -13,7 +13,6 @@ import (
 
 func toIface(t ptr) *ifaceRtype                 { return (*ifaceRtype)(t) }
 func convPtr(p ptr) ptr                         { return *(*ptr)(p) }
-func isEmbedded(f *structField) bool            { return f.offsetEmbed&1 != 0 }
 func structFieldOffset(f *structField) uintptr  { return f.offsetEmbed >> 1 }
 func declareReflectName(n name) nameOff         { return addReflectOff(ptr(n.bytes)) } // It returns a new nameOff that can be used to refer to the pointer.
 func loadConvIface(p ptr, x interface{})        { *(*interface{})(p) = x }
