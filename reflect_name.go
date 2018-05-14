@@ -49,13 +49,14 @@ func (n name) tagLen() int {
 	return int(uint16(*n.data(offset))<<8 | uint16(*n.data(offset + 1)))
 }
 
+// 2452 allocs/op
 func (n name) name() []byte {
 	if n.bytes == nil {
 		return nil
 	}
 	info := (*[4]byte)(ptr(n.bytes))
 	result := make([]byte, n.nameLen())
-	header := (*stringHeader)(ptr(&result))
+	header := (*sliceHeader)(ptr(&result))
 	header.Data = ptr(&info[3])
 	header.Len = n.nameLen()
 	return result
@@ -68,7 +69,7 @@ func (n name) tag() []byte {
 	}
 	nameLen := n.nameLen()
 	result := make([]byte, tagLen)
-	header := (*stringHeader)(ptr(&result))
+	header := (*sliceHeader)(ptr(&result))
 	header.Data = ptr(n.data(3 + nameLen + 2))
 	header.Len = tagLen
 	return result
@@ -97,16 +98,17 @@ func (o tagOptions) Contains(optionName []byte) bool {
 		return false
 	}
 
-	for len(o) > 0 {
+	tmp := o
+	for len(tmp) > 0 {
 		var next []byte
-		i := bytes.IndexByte(o, comma)
+		i := bytes.IndexByte(tmp, comma)
 		if i >= 0 {
-			o, next = o[:i], o[i+1:]
+			tmp, next = tmp[:i], tmp[i+1:]
 		}
-		if bytes.Equal(o, optionName) {
+		if bytes.Equal(tmp, optionName) {
 			return true
 		}
-		o = next
+		tmp = next
 	}
 	return false
 }
@@ -123,8 +125,9 @@ func isValidTag(tag []byte) bool {
 	if len(tag) == 0 {
 		return false
 	}
-	for len(tag) > 0 {
-		r, size := utf8.DecodeRune(tag)
+	tmp := tag
+	for len(tmp) > 0 {
+		r, size := utf8.DecodeRune(tmp)
 		switch {
 		//TODO : can do better than this
 		case bytes.ContainsRune(allowedRunesInTag, r):
@@ -135,46 +138,47 @@ func isValidTag(tag []byte) bool {
 				return false
 			}
 		}
-		tag = tag[size:]
+		tmp = tmp[size:]
 	}
 	return true
 }
 
 func tagLookup(tag, key []byte) []byte {
-	for len(tag) > 0 {
+	tmp := tag
+	for len(tmp) > 0 {
 		// Skip leading space.
 		i := 0
-		for i < len(tag) && tag[i] == ' ' {
+		for i < len(tmp) && tmp[i] == ' ' {
 			i++
 		}
-		tag = tag[i:]
-		if len(tag) == 0 {
+		tmp = tmp[i:]
+		if len(tmp) == 0 {
 			break
 		}
 
 		i = 0
-		for i < len(tag) && tag[i] > ' ' && tag[i] != ':' && tag[i] != '"' && tag[i] != 0x7f {
+		for i < len(tmp) && tmp[i] > ' ' && tmp[i] != ':' && tmp[i] != '"' && tmp[i] != 0x7f {
 			i++
 		}
-		if i == 0 || i+1 >= len(tag) || tag[i] != ':' || tag[i+1] != '"' {
+		if i == 0 || i+1 >= len(tmp) || tmp[i] != ':' || tmp[i+1] != '"' {
 			break
 		}
-		name := tag[:i]
-		tag = tag[i+1:]
+		name := tmp[:i]
+		tmp = tmp[i+1:]
 
 		// Scan quoted string to find value.
 		i = 1
-		for i < len(tag) && tag[i] != '"' {
-			if tag[i] == '\\' {
+		for i < len(tmp) && tmp[i] != '"' {
+			if tmp[i] == '\\' {
 				i++
 			}
 			i++
 		}
-		if i >= len(tag) {
+		if i >= len(tmp) {
 			break
 		}
-		qvalue := tag[:i+1]
-		tag = tag[i+1:]
+		qvalue := tmp[:i+1]
+		tmp = tmp[i+1:]
 
 		if bytes.Equal(key, name) {
 			value, err := Unquote(qvalue)

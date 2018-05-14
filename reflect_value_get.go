@@ -661,10 +661,11 @@ func (t *RType) getMarshalFields() marshalFields {
 					continue
 				}
 
+				tagged := true
 				jsonName, opts := parseTag(tag)
 				if !isValidTag(jsonName) {
-					// TODO : signal error as warning
-					jsonName = []byte{}
+					tagged = false
+					jsonName = field.name.name()
 				}
 
 				indexes := make([]int, len(curField.indexes)+1)
@@ -680,7 +681,6 @@ func (t *RType) getMarshalFields() marshalFields {
 
 				fieldKind := Kind(fieldType.kind & kindMask)
 
-				tagged := len(jsonName) > 0
 				// Record found field and index sequence.
 				if tagged || !embedded || fieldKind != Struct {
 					// Only strings, floats, integers, and booleans implies isBasic.
@@ -692,18 +692,14 @@ func (t *RType) getMarshalFields() marshalFields {
 						}
 					}
 					willBeOmitted := opts.Contains(omitTagOption)
+
 					f := MarshalField{
+						name:      jsonName,
 						tag:       tagged,
 						indexes:   indexes,
 						equalFold: foldFunc(jsonName),
 						isBasic:   isBasic,
 						willOmit:  willBeOmitted,
-					}
-
-					if !tagged {
-						f.name = field.name.name()
-					} else {
-						f.name = jsonName
 					}
 
 					if strings.HasPrefix(fieldType.Name(), "Null") && fieldKind == Struct && willBeOmitted {
