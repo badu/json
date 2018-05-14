@@ -361,7 +361,7 @@ func NewSmallPayload() *SmallPayload {
 	}
 }
 
-func _BenchmarkOldUnmarshalLarge(b *testing.B) {
+func BenchmarkOldUnmarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -370,7 +370,7 @@ func _BenchmarkOldUnmarshalLarge(b *testing.B) {
 	}
 }
 
-func _BenchmarkNewUnmarshalLarge(b *testing.B) {
+func BenchmarkNewUnmarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -379,7 +379,7 @@ func _BenchmarkNewUnmarshalLarge(b *testing.B) {
 	}
 }
 
-func _BenchmarkOldUnmarshalMedium(b *testing.B) {
+func BenchmarkOldUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -388,7 +388,7 @@ func _BenchmarkOldUnmarshalMedium(b *testing.B) {
 	}
 }
 
-func _BenchmarkNewUnmarshalMedium(b *testing.B) {
+func BenchmarkNewUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -397,7 +397,7 @@ func _BenchmarkNewUnmarshalMedium(b *testing.B) {
 	}
 }
 
-func _BenchmarkOldUnmarshalSmall(b *testing.B) {
+func BenchmarkOldUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -406,7 +406,7 @@ func _BenchmarkOldUnmarshalSmall(b *testing.B) {
 	}
 }
 
-func _BenchmarkNewUnmarshalSmall(b *testing.B) {
+func BenchmarkNewUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -435,7 +435,7 @@ func BenchmarkNewMarshalLarge(b *testing.B) {
 	}
 }
 
-func _BenchmarkOldMarshalMedium(b *testing.B) {
+func BenchmarkOldMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -445,7 +445,7 @@ func _BenchmarkOldMarshalMedium(b *testing.B) {
 	}
 }
 
-func _BenchmarkNewMarshalMedium(b *testing.B) {
+func BenchmarkNewMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -455,7 +455,7 @@ func _BenchmarkNewMarshalMedium(b *testing.B) {
 	}
 }
 
-func _BenchmarkOldMarshalSmall(b *testing.B) {
+func BenchmarkOldMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -465,7 +465,7 @@ func _BenchmarkOldMarshalSmall(b *testing.B) {
 	}
 }
 
-func _BenchmarkNewMarshalSmall(b *testing.B) {
+func BenchmarkNewMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

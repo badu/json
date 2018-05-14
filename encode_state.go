@@ -13,6 +13,7 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -103,8 +104,13 @@ func (e *encodeState) marshal(v interface{}) (err error) {
 			err = r.(error)
 		}
 	}()
-	walk(e, ReflectOn(v))
+	//walk(e, ReflectOn(v))
+	e.reflectValue(ReflectOn(v))
 	return nil
+}
+
+func (e *encodeState) reflectValue(v Value) {
+	valueEncoder(v)(e, v)
 }
 
 func (e *encodeState) error(err error) {
@@ -148,320 +154,226 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 	}
 }
 
-func write(e *encodeState, v Value) {
-	switch v.Kind() {
-	case Bool:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		if *(*bool)(v.Ptr) {
-			e.Write(trueLiteral)
-		} else {
-			e.Write(falseLiteral)
-		}
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-
-	case Int:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatInt(int64(*(*int)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Int8:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatInt(int64(*(*int8)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Int16:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatInt(int64(*(*int16)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Int32:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatInt(int64(*(*int32)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Int64:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatInt(*(*int64)(v.Ptr)))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Uint:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(uint64(*(*uint)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Uint8:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(uint64(*(*uint8)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Uint16:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(uint64(*(*uint16)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Uint32:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(uint64(*(*uint32)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Uint64:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(*(*uint64)(v.Ptr)))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case UintPtr:
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(FormatUint(uint64(*(*uintptr)(v.Ptr))))
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Float32:
-		value := float64(*(*float32)(v.Ptr))
-		if math.IsInf(value, 0) || math.IsNaN(value) {
-			e.error(&UnsupportedValueError{FormatFloat(value, 32)})
-		}
-
-		// Convert as if by ES6 number to string conversion.
-		// This matches most other JSON generators.
-		// See golang.org/issue/6384 and golang.org/issue/14135.
-		// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-		abs := math.Abs(value)
-		fmt := fChr
-		// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
-		if abs != 0 {
-			if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
-				fmt = eChr
-			}
-
-		}
-		var b []byte
-		b = AppendFloat(b, value, fmt, 32)
-		if fmt == eChr {
-			// clean up e-09 to e-9
-			n := len(b)
-			if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
-				b[n-2] = b[n-1]
-				b = b[:n-1]
-			}
-		}
-
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(b)
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case Float64:
-		value := *(*float64)(v.Ptr)
-		if math.IsInf(value, 0) || math.IsNaN(value) {
-			e.error(&UnsupportedValueError{FormatFloat(value, 64)})
-		}
-
-		// Convert as if by ES6 number to string conversion.
-		// This matches most other JSON generators.
-		// See golang.org/issue/6384 and golang.org/issue/14135.
-		// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-		abs := math.Abs(value)
-		fmt := fChr
-		if abs != 0 {
-			if abs < 1e-6 || abs >= 1e21 {
-				fmt = eChr
-			}
-		}
-		var b []byte
-		b = AppendFloat(b, value, fmt, 64)
-		if fmt == eChr {
-			// clean up e-09 to e-9
-			n := len(b)
-			if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
-				b[n-2] = b[n-1]
-				b = b[:n-1]
-			}
-		}
-
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-		e.Write(b)
-		if e.opts.quoted {
-			e.WriteByte(quote)
-		}
-	case String:
-		theStr := *(*string)(v.Ptr)
-		if v.Type == typeOfNo {
-			// In Go1.5 the empty string encodes to "0", while this is not a valid number literal we keep compatibility so check validity after this.
-			if len(theStr) == 0 {
-				theStr = "0" // Number's zero-val
-			}
-			if !IsValidNumber(theStr) {
-				e.error(errors.New("json: invalid number literal `" + theStr + "`"))
-			}
-			e.WriteString(theStr)
-		} else {
-			if e.opts.quoted {
-				sb, err := Marshal(theStr)
-				if err != nil {
-					e.error(err)
-				}
-				e.stringBytes(sb)
-			} else {
-				bStr := []byte(theStr)
-				e.stringBytes(bStr)
-			}
-		}
-
+func boolEncoder(e *encodeState, v Value) {
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	if *(*bool)(v.Ptr) {
+		e.Write(trueLiteral)
+	} else {
+		e.Write(falseLiteral)
+	}
+	if e.opts.quoted {
+		e.WriteByte(quote)
 	}
 }
 
-func walk(e *encodeState, v Value) {
-	if !v.IsValid() {
-		// write "null"
+func intEncoder(e *encodeState, v Value) {
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	e.Write(FormatInt(v.Int()))
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+}
+
+func uintEncoder(e *encodeState, v Value) {
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	e.Write(FormatUint(v.Uint()))
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+}
+
+func float32Encoder(e *encodeState, v Value) {
+	value := float64(*(*float32)(v.Ptr))
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		e.error(&UnsupportedValueError{FormatFloat(value, 32)})
+	}
+
+	// Convert as if by ES6 number to string conversion.
+	// This matches most other JSON generators.
+	// See golang.org/issue/6384 and golang.org/issue/14135.
+	// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
+	abs := math.Abs(value)
+	fmt := fChr
+	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
+	if abs != 0 {
+		if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
+			fmt = eChr
+		}
+
+	}
+	var b []byte
+	b = AppendFloat(b, value, fmt, 32)
+	if fmt == eChr {
+		// clean up e-09 to e-9
+		n := len(b)
+		if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
+			b[n-2] = b[n-1]
+			b = b[:n-1]
+		}
+	}
+
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	e.Write(b)
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+}
+
+func float64Encoder(e *encodeState, v Value) {
+	value := *(*float64)(v.Ptr)
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		e.error(&UnsupportedValueError{FormatFloat(value, 64)})
+	}
+
+	// Convert as if by ES6 number to string conversion.
+	// This matches most other JSON generators.
+	// See golang.org/issue/6384 and golang.org/issue/14135.
+	// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
+	abs := math.Abs(value)
+	fmt := fChr
+	if abs != 0 {
+		if abs < 1e-6 || abs >= 1e21 {
+			fmt = eChr
+		}
+	}
+	var b []byte
+	b = AppendFloat(b, value, fmt, 64)
+	if fmt == eChr {
+		// clean up e-09 to e-9
+		n := len(b)
+		if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
+			b[n-2] = b[n-1]
+			b = b[:n-1]
+		}
+	}
+
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+	e.Write(b)
+	if e.opts.quoted {
+		e.WriteByte(quote)
+	}
+}
+
+func stringEncoder(e *encodeState, v Value) {
+	theStr := *(*string)(v.Ptr)
+	if v.Type == typeOfNo {
+		// In Go1.5 the empty string encodes to "0", while this is not a valid number literal we keep compatibility so check validity after this.
+		if len(theStr) == 0 {
+			theStr = "0" // Number's zero-val
+		}
+		if !IsValidNumber(theStr) {
+			e.error(errors.New("json: invalid number literal `" + theStr + "`"))
+		}
+		e.WriteString(theStr)
+	} else {
+		if e.opts.quoted {
+			sb, err := Marshal(theStr)
+			if err != nil {
+				e.error(err)
+			}
+			e.stringBytes(sb)
+		} else {
+			bStr := []byte(theStr)
+			e.stringBytes(bStr)
+		}
+	}
+}
+
+func interfaceEncoder(e *encodeState, v Value) {
+	if v.IsNil() {
 		e.Write(nullLiteral)
 		return
 	}
-
-	// check Marshaler implementation
-	if v.Type.implements(marshalerType) {
-		marshalerEncoder(e, v)
-		return
-	}
-
-	if v.Kind() != Ptr && v.Type.PtrTo().implements(marshalerType) && v.CanAddr() {
-		addrMarshalerEncoder(e, v)
-		return
-	}
-
-	// no Marshaler
-	switch v.Kind() {
-	case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
-		write(e, v)
-	case Interface:
-		if v.IsNil() {
-			// write "null"
-			e.Write(nullLiteral)
-			return
-		}
-		walk(e, v.Iface())
-	case Ptr:
-		if v.IsNil() {
-			// write "null"
-			e.Write(nullLiteral)
-			return
-		}
-		walk(e, v.Deref())
-	case Map:
-		mapEncoder(e, v)
-	case Array:
-		arrayEncoder(e, v)
-	case Slice:
-		sliceEncoder(e, v)
-	case Struct:
-		structEncoder(e, v)
-	default:
-		e.error(&UnsupportedTypeError{v.Type})
-	}
+	e.reflectValue(v.Iface())
 }
 
-func sliceEncoder(e *encodeState, v Value) {
-	// read the slice element
-	deref := v.Type.ConvToSlice().ElemType
-	// Byte slices get special treatment; arrays don't.
-	if deref.Kind() == Uint8 {
-		p := deref.PtrTo()
-		// check if []int8 has it's own marshal implementation
-		if !p.implements(marshalerType) {
-			if v.IsNil() {
-				// write "null"
-				e.Write(nullLiteral)
-				return
-			}
+func invalidValueEncoder(e *encodeState, v Value) {
+	e.Write(nullLiteral)
+}
 
-			e.WriteByte(quote)
-			value := v.Bytes()
-			if len(value) < 1024 {
-				// for small buffers, using Encode directly is much faster.
-				dst := make([]byte, base64.StdEncoding.EncodedLen(len(value)))
-				base64.StdEncoding.Encode(dst, value)
-				e.Write(dst)
-			} else {
-				// for large buffers, avoid unnecessary extra temporary buffer space.
-				enc := base64.NewEncoder(base64.StdEncoding, e)
-				enc.Write(value)
-				enc.Close()
-			}
-			e.WriteByte(quote)
+func unsupportedTypeEncoder(e *encodeState, v Value) {
+	e.error(&UnsupportedTypeError{v.Type})
+}
 
-			return
-		}
-	}
-
+func encodeByteSlice(e *encodeState, v Value) {
 	if v.IsNil() {
 		// write "null"
 		e.Write(nullLiteral)
 		return
 	}
 
-	// process "array"
-	arrayEncoder(e, v)
+	e.WriteByte(quote)
+	value := v.Bytes()
+	if len(value) < 1024 {
+		// for small buffers, using Encode directly is much faster.
+		dst := make([]byte, base64.StdEncoding.EncodedLen(len(value)))
+		base64.StdEncoding.Encode(dst, value)
+		e.Write(dst)
+	} else {
+		// for large buffers, avoid unnecessary extra temporary buffer space.
+		enc := base64.NewEncoder(base64.StdEncoding, e)
+		enc.Write(value)
+		enc.Close()
+	}
+	e.WriteByte(quote)
 }
 
-func arrayEncoder(e *encodeState, v Value) {
+func newCondAddrEncoder(canAddrEnc, elseEnc encoderFunc) encoderFunc {
+	enc := &condAddrEncoder{canAddrEnc: canAddrEnc, elseEnc: elseEnc}
+	return enc.encode
+}
+
+func (ce *condAddrEncoder) encode(e *encodeState, v Value) {
+	if v.CanAddr() {
+		ce.canAddrEnc(e, v)
+	} else {
+		ce.elseEnc(e, v)
+	}
+}
+
+func (pe *cPtrEncoder) encode(e *encodeState, v Value) {
+	if v.IsNil() {
+		e.Write(nullLiteral)
+		return
+	}
+	pe.elemEnc(e, v.Deref())
+}
+
+func (se *cSliceEncoder) encode(e *encodeState, v Value) {
+	if v.IsNil() {
+		e.Write(nullLiteral)
+		return
+	}
+	se.arrayEnc(e, v)
+}
+
+func (ae *cArrayEncoder) encode(e *encodeState, v Value) {
 	// Mark Array Start
 	e.WriteByte(squareOpen)
 	arrLen := 0
 	isSlice := false
 	var slcHeader *sliceHeader
-	var elemType *RType
 	var fl Flag
 	switch v.Kind() {
 	case Array:
 		arrType := (*arrayType)(ptr(v.Type))
 		arrLen = int(arrType.Len)
-		elemType = arrType.ElemType
-		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind())
+		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(ae.elemType.Kind())
 	case Slice:
 		isSlice = true
 		slcHeader = (*sliceHeader)(v.Ptr)
 		arrLen = slcHeader.Len
-		elemType = (*sliceType)(ptr(v.Type)).ElemType
-		fl = addressableFlag | pointerFlag | v.ro() | Flag(elemType.Kind())
+		fl = addressableFlag | pointerFlag | v.ro() | Flag(ae.elemType.Kind())
 	}
 
 	for i := 0; i < arrLen; i++ {
@@ -470,49 +382,22 @@ func arrayEncoder(e *encodeState, v Value) {
 			e.WriteByte(comma)
 		}
 		if isSlice {
-			walk(e, Value{Type: elemType, Ptr: arrayAt(slcHeader.Data, i, elemType.size), Flag: fl})
+			ae.elemEnc(e, Value{Type: ae.elemType, Ptr: arrayAt(slcHeader.Data, i, ae.elemType.size), Flag: fl})
 		} else {
-			walk(e, Value{Type: elemType, Ptr: add(v.Ptr, uintptr(i)*elemType.size), Flag: fl})
+			ae.elemEnc(e, Value{Type: ae.elemType, Ptr: add(v.Ptr, uintptr(i)*ae.elemType.size), Flag: fl})
 		}
 	}
 	// Mark Array End
 	e.WriteByte(squareClose)
 }
 
-func getCachedFields(typ *RType) marshalFields {
-	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
-	fieldsInfo := cachedFields[typ]
-	if fieldsInfo == nil {
-		// Compute fields without lock.
-		// Might duplicate effort but won't hold other computations back.
-		fieldsInfo = typ.getMarshalFields()
-		if fieldsInfo != nil {
-			fieldsCache.mu.Lock()
-			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
-
-			newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
-
-			for typeKey, fieldsValues := range cachedFields {
-				newFieldsMap[typeKey] = fieldsValues
-			}
-
-			newFieldsMap[typ] = fieldsInfo
-			fieldsCache.value.Store(newFieldsMap)
-			fieldsCache.mu.Unlock()
-		}
-	}
-	return fieldsInfo
-}
-
-func structEncoder(e *encodeState, v Value) {
-
-	fieldsInfo := getCachedFields(v.Type)
+func (se *cStructEncoder) encode(e *encodeState, v Value) {
 
 	// Mark Struct Start
 	e.WriteByte(curlOpen)
 
 	first := true
-	for _, curField := range fieldsInfo {
+	for i, curField := range se.fields {
 		// restoring to original value type, since it gets altered below
 		fieldValue := v
 
@@ -572,6 +457,7 @@ func structEncoder(e *encodeState, v Value) {
 
 				if validField.IsValid() && carrierField.IsValid() {
 					isTrue := *(*bool)(validField.Ptr)
+
 					switch carrierField.Kind() {
 					case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
 						if isTrue {
@@ -581,7 +467,20 @@ func structEncoder(e *encodeState, v Value) {
 							e.stringBytes(curField.name)
 							e.WriteByte(colon)
 							e.opts.quoted = curField.isBasic
-							write(e, carrierField)
+							switch carrierField.Kind() {
+							case Bool:
+								boolEncoder(e, carrierField)
+							case Int, Int8, Int16, Int32, Int64:
+								intEncoder(e, carrierField)
+							case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+								uintEncoder(e, carrierField)
+							case Float32:
+								float32Encoder(e, carrierField)
+							case Float64:
+								float64Encoder(e, carrierField)
+							case String:
+								stringEncoder(e, carrierField)
+							}
 						}
 						continue
 					default:
@@ -598,48 +497,30 @@ func structEncoder(e *encodeState, v Value) {
 			}
 		}
 
-		if !first {
+		if first {
+			first = false
+		} else {
 			e.WriteByte(comma)
 		}
 
 		e.stringBytes(curField.name)
 		e.WriteByte(colon)
 		e.opts.quoted = curField.isBasic
-
-		switch fieldValue.Kind() {
-		case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
-			// check Marshaler implementation
-			if fieldValue.Type.implements(marshalerType) {
-				marshalerEncoder(e, fieldValue)
-			} else if fieldValue.Kind() != Ptr && fieldValue.Type.PtrTo().implements(marshalerType) && fieldValue.CanAddr() {
-				addrMarshalerEncoder(e, fieldValue)
-			} else {
-				write(e, fieldValue)
-			}
-		default:
-			walk(e, fieldValue)
-		}
-
-		if first {
-			first = false
-		}
-
+		se.fieldEncs[i](e, fieldValue)
 	}
 
 	//Mark Struct End
 	e.WriteByte(curlClose)
 }
 
-func mapEncoder(e *encodeState, v Value) {
+func (me *cMapEncoder) encode(e *encodeState, v Value) {
 	if v.IsNil() {
 		// Write "null"
 		e.Write(nullLiteral)
 		return
 	}
-
 	// prepare easy access
-	mapElemType := v.Type.ConvToMap().ElemType
-	fl := v.ro() | Flag(mapElemType.Kind())
+	fl := v.ro() | Flag(me.mapElemType.Kind())
 	vPointer := v.pointer()
 
 	// new feature : optional sorting for map keys (default false)
@@ -679,13 +560,13 @@ func mapEncoder(e *encodeState, v Value) {
 			}
 			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 			if elemPtr != nil {
-				if mapElemType.isDirectIface() {
+				if me.mapElemType.isDirectIface() {
 					// Copy result so future changes to the map won't change the underlying value.
-					mapElemValue := unsafeNew(mapElemType)
-					typedmemmove(mapElemType, mapElemValue, elemPtr)
-					walk(e, Value{mapElemType, mapElemValue, fl | pointerFlag | key.value.ro()})
+					mapElemValue := unsafeNew(me.mapElemType)
+					typedmemmove(me.mapElemType, mapElemValue, elemPtr)
+					me.elemEnc(e, Value{me.mapElemType, mapElemValue, fl | pointerFlag | key.value.ro()})
 				} else {
-					walk(e, Value{mapElemType, convPtr(elemPtr), fl | key.value.ro()})
+					me.elemEnc(e, Value{me.mapElemType, convPtr(elemPtr), fl | key.value.ro()})
 				}
 			} else {
 				panic("elemPtr == nil")
@@ -755,13 +636,13 @@ func mapEncoder(e *encodeState, v Value) {
 		}
 		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 		if elemPtr != nil {
-			if mapElemType.isDirectIface() {
+			if me.mapElemType.isDirectIface() {
 				// Copy result so future changes to the map won't change the underlying value.
-				mapElemValue := unsafeNew(mapElemType)
-				typedmemmove(mapElemType, mapElemValue, elemPtr)
-				walk(e, Value{Type: mapElemType, Ptr: mapElemValue, Flag: fl | pointerFlag | key.ro()})
+				mapElemValue := unsafeNew(me.mapElemType)
+				typedmemmove(me.mapElemType, mapElemValue, elemPtr)
+				me.elemEnc(e, Value{Type: me.mapElemType, Ptr: mapElemValue, Flag: fl | pointerFlag | key.ro()})
 			} else {
-				walk(e, Value{Type: mapElemType, Ptr: convPtr(elemPtr), Flag: fl | key.ro()})
+				me.elemEnc(e, Value{Type: me.mapElemType, Ptr: convPtr(elemPtr), Flag: fl | key.ro()})
 			}
 		} else {
 			panic("elemPtr == nil")
@@ -770,6 +651,179 @@ func mapEncoder(e *encodeState, v Value) {
 
 	// Mark Map End
 	e.WriteByte(curlClose)
+}
+
+func getCachedFields(typ *RType) marshalFields {
+	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
+	fieldsInfo := cachedFields[typ]
+	if fieldsInfo == nil {
+		// Compute fields without lock.
+		// Might duplicate effort but won't hold other computations back.
+		fieldsInfo = typ.getMarshalFields()
+		if fieldsInfo != nil {
+			fieldsCache.mu.Lock()
+			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
+
+			newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
+
+			for typeKey, fieldsValues := range cachedFields {
+				newFieldsMap[typeKey] = fieldsValues
+			}
+
+			newFieldsMap[typ] = fieldsInfo
+			fieldsCache.value.Store(newFieldsMap)
+			fieldsCache.mu.Unlock()
+		}
+	}
+	return fieldsInfo
+}
+
+func typeByIndex(t *RType, indexes []int) *RType {
+	for _, i := range indexes {
+		if t.Kind() == Ptr {
+			t = t.Deref()
+		}
+		field := &t.convToStruct().fields[i]
+		t = field.Type
+	}
+	return t
+}
+
+func newStructEncoder(t *RType) encoderFunc {
+	fieldsInfo := getCachedFields(t)
+	se := &cStructEncoder{
+		fields:    fieldsInfo,
+		fieldEncs: make([]encoderFunc, len(fieldsInfo)),
+	}
+	for i, curField := range fieldsInfo {
+		se.fieldEncs[i] = typeEncoder(typeByIndex(t, curField.indexes))
+	}
+	return se.encode
+}
+
+func newSliceEncoder(t *RType) encoderFunc {
+	// read the slice element
+	elemType := t.ConvToSlice().ElemType
+	// Byte slices get special treatment; arrays don't.
+	if elemType.Kind() == Uint8 {
+		ptrToDeref := elemType.PtrTo()
+		// check if []int8 has it's own marshal implementation
+		if !ptrToDeref.implements(marshalerType) {
+			return encodeByteSlice
+		}
+	}
+	enc := &cSliceEncoder{newArrayEncoder(t)}
+	return enc.encode
+}
+
+func newArrayEncoder(t *RType) encoderFunc {
+	switch t.Kind() {
+	case Array:
+		enc := &cArrayEncoder{elemEnc: typeEncoder(t.ConvToArray().ElemType), elemType: t.ConvToArray().ElemType}
+		return enc.encode
+	case Slice:
+		enc := &cArrayEncoder{elemEnc: typeEncoder(t.ConvToSlice().ElemType), elemType: t.ConvToSlice().ElemType}
+		return enc.encode
+	default:
+		panic("Not Array, nor Slice")
+	}
+}
+
+func newPtrEncoder(t *RType) encoderFunc {
+	enc := &cPtrEncoder{typeEncoder(t.Deref())}
+	return enc.encode
+}
+
+func newMapEncoder(t *RType) encoderFunc {
+	mapInfo := t.ConvToMap()
+	switch mapInfo.KeyType.Kind() {
+	case String,
+		Int, Int8, Int16, Int32, Int64,
+		Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+	default:
+		return unsupportedTypeEncoder
+
+	}
+	me := &cMapEncoder{elemEnc: typeEncoder(mapInfo.ElemType), mapElemType: mapInfo.ElemType}
+	return me.encode
+}
+
+func valueEncoder(v Value) encoderFunc {
+	if !v.IsValid() {
+		return invalidValueEncoder
+	}
+	return typeEncoder(v.Type)
+}
+
+func typeEncoder(t *RType) encoderFunc {
+	if fi, ok := encoderCache.Load(t); ok {
+		return fi.(encoderFunc)
+	}
+
+	// To deal with recursive types, populate the map with an
+	// indirect func before we build it. This type waits on the
+	// real func (f) to be ready and then calls it. This indirect
+	// func is only used for recursive types.
+	var (
+		wg sync.WaitGroup
+		f  encoderFunc
+	)
+	wg.Add(1)
+	fi, loaded := encoderCache.LoadOrStore(t, encoderFunc(func(e *encodeState, v Value) {
+		wg.Wait()
+		f(e, v)
+	}))
+	if loaded {
+		return fi.(encoderFunc)
+	}
+
+	// Compute the real encoder and replace the indirect func with it.
+	f = newTypeEncoder(t, true)
+	wg.Done()
+	encoderCache.Store(t, f)
+	return f
+}
+
+// newTypeEncoder constructs an encoderFunc for a type.
+// The returned encoder only checks CanAddr when allowAddr is true.
+func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
+	if t.implements(marshalerType) {
+		return marshalerEncoder
+	}
+	if t.Kind() != Ptr && allowAddr {
+		if t.PtrTo().implements(marshalerType) {
+			return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
+		}
+	}
+
+	switch t.Kind() {
+	case Bool:
+		return boolEncoder
+	case Int, Int8, Int16, Int32, Int64:
+		return intEncoder
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+		return uintEncoder
+	case Float32:
+		return float32Encoder
+	case Float64:
+		return float64Encoder
+	case String:
+		return stringEncoder
+	case Interface:
+		return interfaceEncoder
+	case Struct:
+		return newStructEncoder(t)
+	case Map:
+		return newMapEncoder(t)
+	case Slice:
+		return newSliceEncoder(t)
+	case Array:
+		return newArrayEncoder(t)
+	case Ptr:
+		return newPtrEncoder(t)
+	default:
+		return unsupportedTypeEncoder
+	}
 }
 
 // getMarshalFields returns a list of fields that JSON should recognize for the given type.

@@ -322,10 +322,42 @@ type (
 	}
 
 	qualFn func(srcKey, destKey []byte) bool
+
+	encoderFunc func(e *encodeState, v Value)
+	encFns      []encoderFunc
+
+	cPtrEncoder struct {
+		elemEnc encoderFunc
+	}
+
+	cMapEncoder struct {
+		elemEnc     encoderFunc
+		mapElemType *RType
+	}
+
+	cSliceEncoder struct {
+		arrayEnc encoderFunc
+	}
+
+	cArrayEncoder struct {
+		elemEnc  encoderFunc
+		elemType *RType
+	}
+
+	cStructEncoder struct {
+		fields    marshalFields
+		fieldEncs encFns
+	}
+
+	condAddrEncoder struct {
+		canAddrEnc, elseEnc encoderFunc
+	}
 )
 
 var (
-	fieldsCache struct {
+	// you won't believe how good this encoder cache is
+	encoderCache sync.Map // map[*RType]encoderFunc
+	fieldsCache  struct {
 		value atomic.Value // map[*RType][]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}

@@ -809,7 +809,7 @@ func (v Value) cvtFloatFloat(t *RType) Value     { return makeFloat(v.ro(), v.Fl
 func (v Value) cvtComplexComplex(t *RType) Value { return makeComplex(v.ro(), v.Complex(), t) }              // convert operation: complexXX -> complexXX
 func (v Value) cvtIntString(t *RType) Value      { return makeString(v.ro(), string(v.Int()), t) }           // convert operation: intXX -> string
 func (v Value) cvtUintString(t *RType) Value     { return makeString(v.ro(), string(v.Uint()), t) }          // convert operation: uintXX -> string
-//TODO:  do not use it in other places than convert ???
+
 func (v Value) Complex() complex128 {
 	switch v.Kind() {
 	case Complex64:
@@ -819,7 +819,6 @@ func (v Value) Complex() complex128 {
 	}
 }
 
-//TODO:  do not use it in other places than convert ???
 func (v Value) Float() float64 {
 	switch v.Kind() {
 	case Float32:
@@ -829,7 +828,6 @@ func (v Value) Float() float64 {
 	}
 }
 
-//TODO:  do not use it in other places than convert ???
 func (v Value) Int() int64 {
 	switch v.Kind() {
 	case Int8:
@@ -845,7 +843,6 @@ func (v Value) Int() int64 {
 	}
 }
 
-//TODO:  do not use it in other places than convert ???
 func (v Value) Uint() uint64 {
 	switch v.Kind() {
 	case Uint8:
