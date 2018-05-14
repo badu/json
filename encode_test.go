@@ -187,7 +187,7 @@ func TestRefValMarshal(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if got := string(b); got != want {
-		t.Errorf("got %q,\n want %q", got, want)
+		t.Errorf("got \n%s\n want \n%s", got, want)
 	}
 }
 
@@ -494,7 +494,7 @@ func TestTaggedFieldDominates(t *testing.T) {
 type BugZ struct {
 	BugA
 	BugC
-	BugY // Contains a tagged S field through BugD; should not dominate.
+	BugY // tagContains a tagged S field through BugD; should not dominate.
 }
 
 func TestDuplicatedFieldDisappears(t *testing.T) {
@@ -923,8 +923,8 @@ func TestTagParsing(t *testing.T) {
 		{[]byte("foo"), true},
 		{[]byte("bar"), false},
 	} {
-		if opts.Contains(tt.opt) != tt.want {
-			t.Errorf("Contains(%q) = %v", tt.opt, !tt.want)
+		if opts.tagContains(tt.opt) != tt.want {
+			t.Errorf("tagContains(%q) = %v", tt.opt, !tt.want)
 		}
 	}
 }

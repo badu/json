@@ -65,7 +65,6 @@ func (n Number) Int64() (int64, error) {
 func (w *KeyValuePair) resolve() error {
 	switch w.value.Kind() {
 	case String:
-		// TODO : do this different
 		w.keyName = []byte(*(*string)(w.value.Ptr))
 	case Int:
 		w.keyName = FormatInt(int64(*(*int)(w.value.Ptr)))

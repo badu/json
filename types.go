@@ -293,9 +293,6 @@ type (
 	//
 	Token interface{}
 
-	// tagOptions is the string following a comma in a struct field's "json"
-	// tag, or the empty string. It does not include the leading comma.
-	tagOptions []byte
 	/**
 	Unfortunatelly, removing the feature of sorting maps by their keys (by forcing end user package to do so) is NOT possible.
 	The documentation states :
@@ -337,18 +334,21 @@ var (
 	// the data slice while the decoder executes.
 	errPhase = errors.New("JSON decoder out of sync - data changing underfoot?")
 
-	nullLiteral       = []byte("null")
-	trueLiteral       = []byte("true")
-	falseLiteral      = []byte("false")
-	jsonTagName       = []byte("json")
-	stringTagOption   = []byte("string")
-	omitTagOption     = []byte("omitempty")
-	allowedRunesInTag = []byte("!#$%&()*+-./:<=>?@[]^_{|}~ ")
+	validLiteral       = []byte("Valid")
+	capitalNullLiteral = []byte("Null")
+	nullLiteral        = []byte("null")
+	trueLiteral        = []byte("true")
+	falseLiteral       = []byte("false")
+	jsonTagName        = []byte("json")
+	stringTagOption    = []byte("string")
+	omitTagOption      = []byte("omitempty")
+	allowedRunesInTag  = []byte("!#$%&()*+-./:<=>?@[]^_{|}~ ")
 
 	hex = "0123456789abcdef"
 
 	encodeStatePool sync.Pool
 
+	typeOfNo                    = TypeOf(Number(""))
 	marshalerType               = TypeOf(new(Marshaler)).Deref()
 	unmarshalerType             = TypeOf(new(Unmarshaler)).Deref()
 	_               Marshaler   = (*RawMessage)(nil)

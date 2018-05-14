@@ -452,7 +452,7 @@ func indirect(v Value, decodingNull bool) (Value, bool) {
 		}
 
 		if v.Type.NumMethod() > 0 {
-			if v.Type.Implements(unmarshalerType) {
+			if v.Type.implements(unmarshalerType) {
 				return v, true
 			}
 		}

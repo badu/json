@@ -125,6 +125,25 @@ func (t *RType) Name() string {
 	return string(s[i+1:])
 }
 
+func (t *RType) byteName() []byte {
+	if t.isAnon() {
+		return nil
+	}
+	s := t.nameOffsetStr().name()
+	i := len(s) - 1
+	for i >= 0 {
+		if s[i] == '.' {
+			break
+		}
+		i--
+	}
+	// if we have extra star, and it's the full name, then set it to avoid first char (which is the star)
+	if t.hasExtraStar() && i == -1 {
+		i = 0
+	}
+	return s[i+1:]
+}
+
 func (t *RType) directlyAssignable(dest *RType) bool {
 	// x's type V is identical to T?
 	if dest == t {
@@ -253,17 +272,11 @@ func (t *RType) addTypeBits(vec *bitVector, offset uintptr) {
 		}
 	}
 }
-func (t *RType) Implements(u *RType) bool {
-	if u == nil {
-		return false
-	}
-	if u.Kind() != Interface {
-		return false
-	}
-	return t.implements(u)
-}
 
 func (t *RType) implements(dest *RType) bool {
+	if dest == nil {
+		return false
+	}
 	if dest.Kind() != Interface {
 		return false
 	}
@@ -385,23 +398,18 @@ func (v Value) pointer() ptr {
 }
 
 func (v Value) Deref() Value {
-	switch v.Kind() {
-	case Ptr:
-		ptrToV := v.Ptr
-		if v.isPointer() {
-			ptrToV = convPtr(ptrToV)
-		}
-		// The returned value's address is v's value.
-		if ptrToV == nil {
-			return Value{}
-		}
-		// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
-		typ := v.Type.Deref()
-		fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
-		return Value{Type: typ, Ptr: ptrToV, Flag: fl}
-	default:
-		return v
+	ptrToV := v.Ptr
+	if v.isPointer() {
+		ptrToV = convPtr(ptrToV)
 	}
+	// The returned value's address is v's value.
+	if ptrToV == nil {
+		return Value{}
+	}
+	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
+	typ := v.Type.Deref()
+	fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
+	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
 }
 
 func (v Value) Interface() interface{} {
@@ -437,8 +445,7 @@ func (v Value) Len() int {
 		return (*stringHeader)(v.Ptr).Len // String is bigger than a word; assume pointerFlag.
 	default:
 		panic("reflect.SliceValue.Len : unknown kind `") // + StringKind(v.Kind()) + "`. How did you got here?")
-
-		return 0 // The length of "unknown"
+		return 0                                         // The length of "unknown"
 	}
 
 }
@@ -749,17 +756,15 @@ func (v Value) isEmptyValue() bool {
 }
 
 func (v Value) Field(i int) Value {
-	// we're sure that it is a struct : check is performed in ToStruct()
-	structType := v.Type.convToStruct()
-	if uint(i) >= uint(len(structType.fields)) {
+	typedStruct := v.Type.convToStruct()
+	if uint(i) >= uint(len(typedStruct.fields)) {
 		panic("reflect.Value.Field: Field index out of range")
 	}
 
-	field := &structType.fields[i]
-	typ := field.Type
+	field := &typedStruct.fields[i]
 
 	// Inherit permission bits from v, but clear embedROFlag.
-	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(typ.Kind())
+	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(field.Type.Kind())
 	// Using an unexported field forces exportFlag.
 	if !field.name.isExported() {
 		// is embedded ?
@@ -772,8 +777,18 @@ func (v Value) Field(i int) Value {
 	// Either pointerFlag is set and v.ptr points at struct, or pointerFlag is not set and v.ptr is the actual struct data.
 	// In the former case, we want v.ptr + offset.
 	// In the latter case, we must have field.offset = 0, so v.ptr + field.offset is still the correct address.
-	ptr := add(v.Ptr, structFieldOffset(field))
-	return Value{Type: typ, Ptr: ptr, Flag: fl}
+	return Value{Type: field.Type, Ptr: add(v.Ptr, structFieldOffset(field)), Flag: fl}
+}
+
+func (v Value) getField(i int) Value {
+	field := &v.Type.convToStruct().fields[i]
+
+	// Inherit permission bits from v, but clear embedROFlag.
+	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(field.Type.Kind())
+	// Either pointerFlag is set and v.ptr points at struct, or pointerFlag is not set and v.ptr is the actual struct data.
+	// In the former case, we want v.ptr + offset.
+	// In the latter case, we must have field.offset = 0, so v.ptr + field.offset is still the correct address.
+	return Value{Type: field.Type, Ptr: add(v.Ptr, structFieldOffset(field)), Flag: fl}
 }
 
 // ==============

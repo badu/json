@@ -104,7 +104,7 @@ func Copy(dest, src Value) (int, bool) {
 
 	}
 
-	destKind := dest.Type.Kind()
+	destKind := dest.Kind()
 
 	sKind := src.Kind()
 	var stringCopy bool
@@ -132,9 +132,9 @@ func Copy(dest, src Value) (int, bool) {
 
 	if !stringCopy {
 		var se *RType
-		if src.Type.Kind() == Array {
+		if src.Kind() == Array {
 			se = src.Type.ConvToArray().ElemType
-		} else if src.Type.Kind() == Slice {
+		} else if src.Kind() == Slice {
 			se = src.Type.ConvToSlice().ElemType
 		}
 		if de != se {

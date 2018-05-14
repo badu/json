@@ -31,7 +31,7 @@ func (n name) data(offset int) *byte {
 }
 
 func (n name) isExported() bool {
-	return (*n.bytes)&(1<<0) != 0
+	return (*n.bytes)&(1) != 0
 }
 
 func (n name) nameLen() int {
@@ -42,23 +42,23 @@ func (n name) nameLen() int {
 }
 
 func (n name) tagLen() int {
-	if *n.data(0)&(1<<1) == 0 {
+	if *n.data(0)&(2) == 0 {
 		return 0
 	}
 	offset := 3 + n.nameLen()
 	return int(uint16(*n.data(offset))<<8 | uint16(*n.data(offset + 1)))
 }
 
-// 2452 allocs/op
 func (n name) name() []byte {
 	if n.bytes == nil {
 		return nil
 	}
 	info := (*[4]byte)(ptr(n.bytes))
-	result := make([]byte, n.nameLen())
+	nameLen := n.nameLen()
+	result := make([]byte, nameLen)
 	header := (*sliceHeader)(ptr(&result))
 	header.Data = ptr(&info[3])
-	header.Len = n.nameLen()
+	header.Len = nameLen
 	return result
 }
 
@@ -70,7 +70,7 @@ func (n name) tag() []byte {
 	nameLen := n.nameLen()
 	result := make([]byte, tagLen)
 	header := (*sliceHeader)(ptr(&result))
-	header.Data = ptr(n.data(3 + nameLen + 2))
+	header.Data = ptr(n.data(5 + nameLen))
 	header.Len = tagLen
 	return result
 }
@@ -90,15 +90,15 @@ func (n name) pkgPath() []byte {
 	return pkgPathName.name()
 }
 
-// Contains reports whether a comma-separated list of options
+// tagContains reports whether a comma-separated list of options
 // contains a particular substr flag. substr must be surrounded by a
 // string boundary or commas.
-func (o tagOptions) Contains(optionName []byte) bool {
-	if len(o) == 0 {
+func tagContains(tag, optionName []byte) bool {
+	if len(tag) == 0 {
 		return false
 	}
 
-	tmp := o
+	tmp := tag
 	for len(tmp) > 0 {
 		var next []byte
 		i := bytes.IndexByte(tmp, comma)
@@ -114,11 +114,11 @@ func (o tagOptions) Contains(optionName []byte) bool {
 }
 
 // parseTag splits a struct field's json tag into its name and comma-separated options.
-func parseTag(tag []byte) ([]byte, tagOptions) {
+func parseTag(tag []byte) ([]byte, []byte) {
 	if idx := bytes.IndexByte(tag, comma); idx != -1 {
 		return tag[:idx], tag[idx+1:]
 	}
-	return tag, tagOptions{}
+	return tag, nil
 }
 
 func isValidTag(tag []byte) bool {
