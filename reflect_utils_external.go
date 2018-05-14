@@ -12,10 +12,6 @@ func resolveNameOff(ptrInModule unsafe.Pointer, off int32) unsafe.Pointer
 //go:linkname resolveTypeOff reflect.resolveTypeOff
 func resolveTypeOff(rtype unsafe.Pointer, off int32) unsafe.Pointer
 
-// resolveTextOff resolves an function pointer offset from a base type.
-//go:linkname resolveTextOff reflect.resolveTextOff
-func resolveTextOff(rtype unsafe.Pointer, off int32) unsafe.Pointer
-
 // addReflectOff adds a pointer to the reflection lookup map in the runtime.
 // It returns a new ID that can be used as a typeOff or textOffset, and will be resolved correctly. Implemented in the runtime package.
 //go:linkname addReflectOff reflect.addReflectOff
@@ -53,29 +49,16 @@ func unsafeNewArray(*RType, int) unsafe.Pointer
 //go:linkname typedmemmove reflect.typedmemmove
 func typedmemmove(t *RType, dst, src unsafe.Pointer)
 
-// typedmemmovepartial is like typedmemmove but assumes that
-// dst and src point off bytes into the value and only copies size bytes.
-//go:noescape
-//go:linkname typedmemmovepartial reflect.typedmemmovepartial
-func typedmemmovepartial(t *RType, dst, src unsafe.Pointer, off, size uintptr)
-
 // typedslicecopy copies a slice of elemType values from src to dst,
 // returning the number of elements copied.
 //go:noescape
 //go:linkname typedslicecopy reflect.typedslicecopy
 func typedslicecopy(elemType *RType, dst, src sliceHeader) int
 
-//go:noescape
-//go:linkname memclrNoHeapPointers reflect.memclrNoHeapPointers
-func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr)
-
 //go:linkname ifaceE2I reflect.ifaceE2I
 func ifaceE2I(t *RType, src interface{}, dst unsafe.Pointer)
 
 /////////////////// Maps ////////////
-
-//go:linkname ismapkey reflect.ismapkey
-func ismapkey(*RType) bool
 
 //go:noescape
 //go:linkname mapassign reflect.mapassign
@@ -93,10 +76,6 @@ func mapaccess(t *RType, m unsafe.Pointer, key unsafe.Pointer) (val unsafe.Point
 
 //go:linkname makemap reflect.makemap
 func makemap(t *RType, cap int) (m unsafe.Pointer)
-
-//go:noescape
-//go:linkname mapdelete reflect.mapdelete
-func mapdelete(t *RType, m unsafe.Pointer, key unsafe.Pointer)
 
 //go:noescape
 //go:linkname mapiterkey reflect.mapiterkey

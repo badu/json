@@ -1,7 +1,6 @@
 package json
 
 import (
-	"runtime"
 	"unsafe"
 )
 
@@ -19,13 +18,7 @@ const (
 	kindMaskFlag Flag = 1<<kindWidthFlag - 1
 	exportFlag   Flag = stickyROFlag | embedROFlag
 
-	// The remaining 23+ bits give a method number for method values.
-	// If flag.kind() != Func, code can assume that methodFlag is unset.
-	// If isDirectIface(Type), code can assume that pointerFlag is set.
-	methodShiftFlag = 10
-
 	kindDirectIface = 1 << 5
-	kindGCProg      = 1 << 6 // Type.gc points to GC program
 	kindNoPointers  = 1 << 7
 	kindMask        = (1 << 5) - 1
 	// hasExtraInfoFlag means that there is a pointer, *info, just beyond the outer type structure.
@@ -49,30 +42,8 @@ const (
 	// hasNameFlag means the type has a name.
 	hasNameFlag extraFlag = 1 << 2
 
-	maxPtrMaskBytes  = 2048 // See cmd/compile/x/gc/reflect.go for derivation of constant.
-	additionalOffset = unsafe.Sizeof(uncommonType{})
-
-	PtrSize    = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ideal const
-	IsAMD64p32 = runtime.GOARCH == "amd64p32"
-
-	// Make sure these routines stay in sync with ../../runtime/hashmap.go!
-	// These types exist only for GC, so we only fill out GC relevant info.
-	// Currently, that's just size and the GC program. We also fill in string
-	// for possible debugging use.
-	bucketSize uintptr = 8
-	maxKeySize uintptr = 128
-	maxValSize uintptr = 128
-
-	openPar   byte = '('
-	closePar  byte = ')'
-	sqOpenPar byte = '['
-	sqClosPar byte = ']'
-	star      byte = '*'
-
-	mapStr    = "map"
-	bucketStr = "bucket"
-	methStr   = "methodargs"
-	fnStr     = "funcargs"
+	PtrSize      = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ideal const
+	star    byte = '*'
 )
 
 const (
@@ -347,20 +318,6 @@ type (
 	// (COMPILER)
 	ifaceRtype struct {
 		Type *RType
-		word unsafe.Pointer
-	}
-
-	// nonEmptyInterface is the header for an interface value with methods.
-	// see ../runtime/iface.go:/Itab
-	// (COMPILER)
-	concreteRtype struct {
-		iTab *struct {
-			IfaceType *RType                 // static interface type
-			Type      *RType                 // dynamic concrete type
-			hash      uint32                 // copy of Type.hash
-			_         [4]byte                // ignored
-			fun       [100000]unsafe.Pointer // method table
-		}
 		word unsafe.Pointer
 	}
 

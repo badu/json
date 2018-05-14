@@ -1425,7 +1425,7 @@ func TestInterfaceSet(t *testing.T) {
 			continue
 		}
 		if !reflect.DeepEqual(b.X, tt.post) {
-			t.Errorf("Unmarshal %#q into %#v: X=%#v, want %#v", blob, tt.pre, b.X, tt.post)
+			t.Errorf("Unmarshal %#q into %#v: got `%#v`, want `%#v`", blob, tt.pre, b.X, tt.post)
 		}
 	}
 }

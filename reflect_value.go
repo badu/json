@@ -412,47 +412,11 @@ func (v Value) Deref() Value {
 	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
 }
 
-func (v Value) Interface() interface{} {
-	if !v.IsValid() {
-		return nil
-	}
-	if !v.isExported() {
-	}
-	return v.valueInterface()
-}
-
-func (v Value) Addr() Value {
-	if !v.CanAddr() {
-		panic("reflect.Value.Addr: called on a NON addressable value")
-	}
-	return Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
-}
-
 func (v Value) ro() Flag {
 	if !v.isExported() {
 		return stickyROFlag
 	}
 	return 0
-}
-
-func (v Value) Len() int {
-	switch v.Kind() {
-	case Array:
-		return int(v.Type.ConvToArray().Len)
-	case Slice:
-		return (*sliceHeader)(v.Ptr).Len // Slice is bigger than a word; assume pointerFlag.
-	case String:
-		return (*stringHeader)(v.Ptr).Len // String is bigger than a word; assume pointerFlag.
-	default:
-		panic("reflect.SliceValue.Len : unknown kind `") // + StringKind(v.Kind()) + "`. How did you got here?")
-		return 0                                         // The length of "unknown"
-	}
-
-}
-
-// Len returns v's length.
-func (v Value) MapLen() int {
-	return maplen(v.pointer())
 }
 
 func (v Value) valueInterface() interface{} {
@@ -546,17 +510,6 @@ func (v Value) assertE2I(dst *RType, target ptr) {
 	}
 }
 
-func (v Value) Bytes() []byte {
-	if v.Kind() != Slice {
-		return nil
-	}
-	if v.Type.ConvToSlice().ElemType.Kind() != Uint8 {
-		return nil
-	}
-	// Slice is always bigger than a word; assume pointerFlag.
-	return *(*[]byte)(v.Ptr)
-}
-
 func (v Value) Index(i int) Value {
 	switch v.Kind() {
 	case Array:
@@ -602,78 +555,6 @@ func (v Value) Index(i int) Value {
 		// TODO : panic
 		return Value{}
 	}
-}
-
-// MapIndex returns the value associated with key in the map v.
-// It returns the zero Value if key is not found in the map or if v represents a nil map.
-// As in Go, the key's value must be assignable to the map's key type.
-func (v Value) MapIndex(key Value) Value {
-	mapType := v.Type.ConvToMap()
-	// Do not require key to be exported, so that DeepEqual and other programs can use all the keys returned by MapKeys as arguments to MapIndex. If either the map or the key is unexported, though, the result will be considered unexported.
-	// This is consistent with the behavior for structs, which allow read but not write of unexported fields.
-	key = key.assignTo(mapType.KeyType, nil)
-
-	var keyPtr ptr
-	if key.isPointer() {
-		keyPtr = key.Ptr
-	} else {
-		keyPtr = ptr(&key.Ptr)
-	}
-
-	elemPtr := mapaccess(v.Type, v.pointer(), keyPtr)
-	if elemPtr == nil {
-		// we could return nil, but deep equal will panic
-		// TODO : panic
-		return Value{}
-	}
-
-	mapElemType := mapType.ElemType
-	fl := v.ro() | key.ro()
-	fl |= Flag(mapElemType.Kind())
-	if !mapElemType.isDirectIface() {
-		return Value{mapElemType, convPtr(elemPtr), fl}
-	}
-
-	// Copy result so future changes to the map won't change the underlying value.
-	mapElemValue := unsafeNew(mapElemType)
-	typedmemmove(mapElemType, mapElemValue, elemPtr)
-	return Value{mapElemType, mapElemValue, fl | pointerFlag}
-}
-
-// MapKeys returns a slice containing all the keys present in the map, in unspecified order.
-// It returns an empty slice if v represents a nil map.
-func (v Value) MapKeys() []Value {
-	mapType := v.Type.ConvToMap()
-	keyType := mapType.KeyType
-
-	fl := v.ro() | Flag(keyType.Kind())
-
-	mapPtr := v.pointer()
-	mapLen := int(0)
-	if mapPtr != nil {
-		mapLen = maplen(mapPtr)
-	}
-
-	it := mapiterinit(v.Type, mapPtr)
-	result := make([]Value, mapLen)
-	var i int
-	for i = 0; i < len(result); i++ {
-		key := mapiterkey(it)
-		if key == nil {
-			// Someone deleted an entry from the map since we called maplen above. It's a data race, but nothing we can do about it.
-			break
-		}
-		if keyType.isDirectIface() {
-			// Copy result so future changes to the map won't change the underlying value.
-			keyValue := unsafeNew(keyType)
-			typedmemmove(keyType, keyValue, key)
-			result[i] = Value{keyType, keyValue, fl | pointerFlag}
-		} else {
-			result[i] = Value{keyType, convPtr(key), fl}
-		}
-		mapiternext(it)
-	}
-	return result[:i]
 }
 
 func (v Value) Iface() Value {
@@ -755,13 +636,8 @@ func (v Value) isEmptyValue() bool {
 	return false
 }
 
-func (v Value) Field(i int) Value {
-	typedStruct := v.Type.convToStruct()
-	if uint(i) >= uint(len(typedStruct.fields)) {
-		panic("reflect.Value.Field: Field index out of range")
-	}
-
-	field := &typedStruct.fields[i]
+func (v Value) getField(i int) Value {
+	field := &v.Type.convToStruct().fields[i]
 
 	// Inherit permission bits from v, but clear embedROFlag.
 	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(field.Type.Kind())
@@ -774,17 +650,6 @@ func (v Value) Field(i int) Value {
 			fl |= stickyROFlag
 		}
 	}
-	// Either pointerFlag is set and v.ptr points at struct, or pointerFlag is not set and v.ptr is the actual struct data.
-	// In the former case, we want v.ptr + offset.
-	// In the latter case, we must have field.offset = 0, so v.ptr + field.offset is still the correct address.
-	return Value{Type: field.Type, Ptr: add(v.Ptr, structFieldOffset(field)), Flag: fl}
-}
-
-func (v Value) getField(i int) Value {
-	field := &v.Type.convToStruct().fields[i]
-
-	// Inherit permission bits from v, but clear embedROFlag.
-	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(field.Type.Kind())
 	// Either pointerFlag is set and v.ptr points at struct, or pointerFlag is not set and v.ptr is the actual struct data.
 	// In the former case, we want v.ptr + offset.
 	// In the latter case, we must have field.offset = 0, so v.ptr + field.offset is still the correct address.
@@ -984,88 +849,26 @@ func (v Value) Convert(dst *RType) Value {
 	panic("reflect.Value.Convert: value of type ") // + TypeToString(v.Type) + " cannot be converted to type " + TypeToString(t))
 }
 
-func (v Value) Set(toX Value) bool {
-	x := toX
-
-	if !v.IsValid() || !v.CanSet() {
-		panic("reflect.Value.Set : value is not settable.")
-		return false
-	}
-	// do not let unexported x leak
-	if !x.IsValid() || !x.isExported() {
-		panic("reflect.Value.Set : parameter is not exported.")
-		return false
-	}
+func (v Value) Set(toX Value) {
 	var target ptr
 	if v.Kind() == Interface {
 		target = v.Ptr
 	}
-	x = x.assignTo(v.Type, target)
-	if x.isPointer() {
-		typedmemmove(v.Type, v.Ptr, x.Ptr)
+	toX = toX.assignTo(v.Type, target)
+	if toX.isPointer() {
+		typedmemmove(v.Type, v.Ptr, toX.Ptr)
 	} else {
-		loadConvPtr(v.Ptr, x.Ptr)
-	}
-	return true
-}
-
-func (v Value) Cap() int {
-	switch v.Kind() {
-	case Array:
-		return int(v.Type.ConvToArray().Len)
-	case Slice:
-		return (*sliceHeader)(v.Ptr).Cap // Slice is always bigger than a word; assume pointerFlag.
-	case String:
-		return (*stringHeader)(v.Ptr).Len
-	default:
-		// kind checks are performed in public ToSlice(), so this should NEVER happen
-
-		println("reflect.Iterable.Slice : unknown kind `") // + StringKind(v.Kind()) + "`. How did you got here?")
-
-		return 0 // The Cap of "unknown"
+		loadConvPtr(v.Ptr, toX.Ptr)
 	}
 }
-func (v Value) SetLen(n int) {
-	if v.Kind() != Slice || !v.IsValid() || !v.CanSet() {
-		println("reflect.SliceValue.SetLen: kind not slice (`") // + StringKind(v.Kind()) + "`) or invalid or not settable")
-		return
-	}
-	header := (*sliceHeader)(v.Ptr)
-	if uint(n) > uint(header.Cap) {
-		println("reflect.SliceValue.SetLen: slice length out of range")
-		return
-	}
-	header.Len = n
-}
 
-func (v Value) SetMapIndex(key, value Value) {
-	if !v.IsValid() || !v.isExported() {
-		println("reflect.MapValue.SetMapIndex: map must be exported")
-		return
-	}
-	if !key.IsValid() || !key.isExported() {
-		println("reflect.MapValue.SetMapIndex: key must be exported")
-		return
-	}
-
-	mapType := v.Type.ConvToMap()
+func (v Value) setMapIndex(mapType *mapType, key, value Value) {
 	key = key.assignTo(mapType.KeyType, nil)
 	var keyPtr ptr
 	if key.isPointer() {
 		keyPtr = key.Ptr
 	} else {
 		keyPtr = ptr(&key.Ptr)
-	}
-
-	if value.Type == nil {
-		// this allows us to delete from map, when setting key to nil value
-		mapdelete(v.Type, v.pointer(), keyPtr)
-		return
-	}
-
-	// now we check the value too - we don't check this earlier, because delete operations
-	if !value.IsValid() || !value.isExported() {
-		return
 	}
 
 	value = value.assignTo(mapType.ElemType, nil)

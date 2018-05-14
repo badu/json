@@ -122,7 +122,11 @@ func marshalerEncoder(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-	m, ok := v.Interface().(Marshaler)
+	if !v.IsValid() {
+		e.error(errors.New("Invalid value while calling Marshal"))
+		return
+	}
+	m, ok := v.valueInterface().(Marshaler)
 	if !ok {
 		e.Write(nullLiteral)
 		return
@@ -138,12 +142,16 @@ func marshalerEncoder(e *encodeState, v Value) {
 }
 
 func addrMarshalerEncoder(e *encodeState, v Value) {
-	va := v.Addr()
+	va := Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
 	if va.IsNil() {
 		e.Write(nullLiteral)
 		return
 	}
-	m := va.Interface().(Marshaler)
+	if !va.IsValid() {
+		e.error(errors.New("Invalid value while calling [addr] Marshal"))
+		return
+	}
+	m := va.valueInterface().(Marshaler)
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
@@ -297,7 +305,7 @@ func interfaceEncoder(e *encodeState, v Value) {
 	e.reflectValue(v.Iface())
 }
 
-func invalidValueEncoder(e *encodeState, v Value) {
+func invalidValueEncoder(e *encodeState, _ Value) {
 	e.Write(nullLiteral)
 }
 
@@ -313,7 +321,7 @@ func encodeByteSlice(e *encodeState, v Value) {
 	}
 
 	e.WriteByte(quote)
-	value := v.Bytes()
+	value := *(*[]byte)(v.Ptr)
 	if len(value) < 1024 {
 		// for small buffers, using Encode directly is much faster.
 		dst := make([]byte, base64.StdEncoding.EncodedLen(len(value)))
@@ -375,16 +383,19 @@ func (ae *cArrayEncoder) encode(e *encodeState, v Value) {
 		arrLen = slcHeader.Len
 		fl = addressableFlag | pointerFlag | v.ro() | Flag(ae.elemType.Kind())
 	}
-
+	// doesn't seem to help much, but we're reusing it anyway
+	daVal := Value{Type: ae.elemType, Flag: fl}
 	for i := 0; i < arrLen; i++ {
 		if i > 0 {
 			// Next Array Element
 			e.WriteByte(comma)
 		}
 		if isSlice {
-			ae.elemEnc(e, Value{Type: ae.elemType, Ptr: arrayAt(slcHeader.Data, i, ae.elemType.size), Flag: fl})
+			daVal.Ptr = arrayAt(slcHeader.Data, i, ae.elemType.size)
+			ae.elemEnc(e, daVal)
 		} else {
-			ae.elemEnc(e, Value{Type: ae.elemType, Ptr: add(v.Ptr, uintptr(i)*ae.elemType.size), Flag: fl})
+			daVal.Ptr = add(v.Ptr, uintptr(i)*ae.elemType.size)
+			ae.elemEnc(e, daVal)
 		}
 	}
 	// Mark Array End
@@ -486,7 +497,7 @@ func (se *cStructEncoder) encode(e *encodeState, v Value) {
 					default:
 						if !isTrue {
 							// if it's time, we're avoiding writing "null"
-							_, isTime := carrierField.Interface().(time.Time)
+							_, isTime := carrierField.valueInterface().(time.Time)
 							if isTime {
 								continue
 							}
@@ -523,14 +534,46 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 	fl := v.ro() | Flag(me.mapElemType.Kind())
 	vPointer := v.pointer()
 
+	// prepare map keys
+	typedMap := v.Type.ConvToMap()
+	keyType := typedMap.KeyType
+
+	mapkeyfl := v.ro() | Flag(keyType.Kind())
+
+	mapPtr := v.pointer()
+	mapLen := int(0)
+	if mapPtr != nil {
+		mapLen = maplen(mapPtr)
+	}
+
+	it := mapiterinit(v.Type, mapPtr)
+	mapKeys := make([]Value, mapLen)
+	for i := 0; i < len(mapKeys); i++ {
+		key := mapiterkey(it)
+		if key == nil {
+			// Someone deleted an entry from the map since we called maplen above. It's a data race, but nothing we can do about it.
+			break
+		}
+		if keyType.isDirectIface() {
+			// Copy result so future changes to the map won't change the underlying value.
+			keyValue := unsafeNew(keyType)
+			typedmemmove(keyType, keyValue, key)
+			mapKeys[i] = Value{keyType, keyValue, mapkeyfl | pointerFlag}
+		} else {
+			mapKeys[i] = Value{keyType, convPtr(key), mapkeyfl}
+		}
+		mapiternext(it)
+	}
+
 	// new feature : optional sorting for map keys (default false)
 	if e.opts.willSortMapKeys {
 		// Mark Map Start
 		e.WriteByte(curlOpen)
 
-		result := make([]KeyValuePair, len(v.MapKeys()))
+		// TODO : maybe use preparation above in the same operation (instead of iterating twice)
+		result := make([]KeyValuePair, len(mapKeys))
 
-		for idx, key := range v.MapKeys() {
+		for idx, key := range mapKeys {
 			result[idx].value = key
 			if err := result[idx].resolve(); err != nil {
 				//error(&MarshalerError{key.Type(), err})
@@ -544,9 +587,10 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 			}
 			return false
 		})
-
-		for i, key := range result {
-			if i > 0 {
+		// doesn't seem to help much, but we're reusing it anyway
+		daVal := Value{Type: me.mapElemType}
+		for j, key := range result {
+			if j > 0 {
 				e.WriteByte(comma)
 			}
 			e.stringBytes(key.keyName)
@@ -564,9 +608,13 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 					// Copy result so future changes to the map won't change the underlying value.
 					mapElemValue := unsafeNew(me.mapElemType)
 					typedmemmove(me.mapElemType, mapElemValue, elemPtr)
-					me.elemEnc(e, Value{me.mapElemType, mapElemValue, fl | pointerFlag | key.value.ro()})
+					daVal.Ptr = mapElemValue
+					daVal.Flag = fl | pointerFlag | key.value.ro()
+					me.elemEnc(e, daVal)
 				} else {
-					me.elemEnc(e, Value{me.mapElemType, convPtr(elemPtr), fl | key.value.ro()})
+					daVal.Ptr = convPtr(elemPtr)
+					daVal.Flag = fl | key.value.ro()
+					me.elemEnc(e, daVal)
 				}
 			} else {
 				panic("elemPtr == nil")
@@ -583,7 +631,7 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 	e.WriteByte(curlOpen)
 	// checking and setting key kind
 	keyKind := Invalid
-	for _, key := range v.MapKeys() {
+	for _, key := range mapKeys {
 		keyKind = key.Kind()
 		switch keyKind {
 		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, String:
@@ -593,7 +641,7 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 		break
 	}
 	// default, unsorted map keys
-	for i, key := range v.MapKeys() {
+	for i, key := range mapKeys {
 		var keyName []byte
 
 		switch keyKind {
@@ -858,10 +906,8 @@ func (t *RType) getMarshalFields() marshalFields {
 			for index := range curStruct.fields {
 				field := &curStruct.fields[index]
 				fieldType := field.Type
-				fieldName := make([]byte, field.name.nameLen())
-				copy(fieldName, field.name.name())
-				fieldTag := make([]byte, field.name.tagLen())
-				copy(fieldTag, field.name.tag())
+				fieldName := field.name.name()
+				fieldTag := field.name.tag()
 
 				embedded := field.offsetEmbed&1 != 0
 				isNotExported := false

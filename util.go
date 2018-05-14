@@ -217,13 +217,14 @@ func unquoteBytes(target []byte) ([]byte, bool) {
 	return result[0:copyLen], true
 }
 
-func newEncodeState() *encodeState {
+func newEncodeState(opts encOpts) *encodeState {
 	if v := encodeStatePool.Get(); v != nil {
 		e := v.(*encodeState)
 		e.Reset()
+		e.opts = opts
 		return e
 	}
-	return new(encodeState)
+	return &encodeState{opts: opts}
 }
 
 // foldFunc returns one of four different case folding equivalence functions, from most general (and slow) to fastest:
@@ -425,7 +426,7 @@ func quoteChar(c byte) string {
 func indirect(v Value, decodingNull bool) (Value, bool) {
 	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
 	if v.Kind() != Ptr && v.Type.Name() != "" && v.CanAddr() {
-		v = v.Addr()
+		v = Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
 	}
 	for {
 		// Load value from interface, but only if the result will be

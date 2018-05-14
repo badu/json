@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"github.com/adrg/errors"
 	"runtime"
 )
 
@@ -136,7 +137,11 @@ func (d *decodeState) unmarshal(v interface{}) (err error) {
 }
 
 func (d *decodeState) callUnmarshaller(value Value, item []byte) {
-	unmarshaler, _ := value.Interface().(Unmarshaler)
+	if !value.IsValid() {
+		d.error(errors.New("Invalid value while calling Unmarshal"))
+		return
+	}
+	unmarshaler, _ := value.valueInterface().(Unmarshaler)
 	err := unmarshaler.UnmarshalJSON(item)
 	if err != nil {
 		d.error(err)
@@ -429,15 +434,23 @@ func (d *decodeState) literalStore(item []byte, v Value) {
 
 // array consumes an array from d.data[d.off-1:], decoding into the value v. the first byte of the array ('[') has been read already.
 func (d *decodeState) array(v Value) {
-	//if walker.isIfaceWNoMeths() {
 	if v.Kind() == Interface && v.NumMethod() == 0 {
 		v.Set(ReflectOn(d.arrayInterface()))
 		return
 	}
+
+	var slcHeader *sliceHeader
+	var elemType *RType
+	theLen := 0
 	// Check type of target.
 	switch v.Kind() {
 	case Array: // valid
+		theLen = int(v.Type.ConvToArray().Len)
+		elemType = v.Type.ConvToArray().ElemType
 	case Slice: // valid
+		elemType = v.Type.ConvToSlice().ElemType
+		slcHeader = (*sliceHeader)(v.Ptr)
+		theLen = slcHeader.Len
 	default:
 		d.saveError(&UnmarshalTypeError{Value: "array", Type: v.Type, Offset: int64(d.offset)})
 		d.offset--
@@ -459,23 +472,33 @@ func (d *decodeState) array(v Value) {
 		d.scan.undo(op)
 
 		// Get element of array, growing if necessary.
-		if v.Kind() == Slice {
+		switch v.Kind() {
+		case Slice:
 			// Grow slice if necessary
-			if i >= v.Cap() {
-				newCap := v.Cap() + v.Cap()/2
+			if i >= slcHeader.Cap {
+				newCap := slcHeader.Cap + slcHeader.Cap/2
 				if newCap < 4 {
-					newCap = 4
+					newCap = 4 // by a fair roll of dice ?
 				}
-				newSlice := MakeSlice(v.Type, v.Len(), newCap)
-				Copy(newSlice, v)
+
+				// short version for MakeSlice(typ,len,cap)
+				s := sliceHeader{unsafeNewArray(elemType, newCap), slcHeader.Len, newCap}
+				newSlice := Value{Type: v.Type, Ptr: ptr(&s), Flag: pointerFlag | Flag(Slice)}
+
+				// short version of Copy(destSlice, srcSlice)
+				ds := *(*sliceHeader)(newSlice.Ptr)
+				typedslicecopy(elemType, ds, *slcHeader)
+
 				v.Set(newSlice)
 			}
-			if i >= v.Len() {
-				v.SetLen(i + 1)
+
+			if i >= slcHeader.Len {
+				slcHeader.Len = i + 1 // short version of  v.SetLen(i + 1)
+				theLen = slcHeader.Len
 			}
 		}
 
-		if i < v.Len() {
+		if i < theLen {
 			// Decode into element.
 			d.process(v.Index(i))
 		} else {
@@ -495,30 +518,34 @@ func (d *decodeState) array(v Value) {
 		}
 	}
 
-	if i < v.Len() {
+	if i < theLen {
 		switch v.Kind() {
 		case Array:
 			// Array. Zero the rest.
-			zero := Zero(v.Type.ConvToArray().ElemType) //.Elem())
-			for ; i < v.Len(); i++ {
+			zero := Zero(elemType)
+			for ; i < theLen; i++ {
 				v.Index(i).Set(zero)
 			}
 		default:
-			v.SetLen(i)
+			(*sliceHeader)(v.Ptr).Len = i // short version of v.SetLen(i)
 		}
 	}
 
 	if i == 0 && v.Kind() == Slice {
-		v.Set(MakeSlice(v.Type, 0, 0))
-	}
+		// short version for MakeSlice(typ,len,cap)
+		s := sliceHeader{unsafeNewArray(elemType, 0), 0, 0}
+		newSlice := Value{Type: v.Type, Ptr: ptr(&s), Flag: pointerFlag | Flag(Slice)}
 
+		v.Set(newSlice)
+	}
 }
 
 func (d *decodeState) doMap(v Value) {
 	// Map key must either have string kind, have an integer kind
 	// Check type of target: `struct` or `map[T1]T2` where `T1` is string, an integer type
-	mapType := v.Type.ConvToMap()
-	switch mapType.KeyType.Kind() {
+	typedMap := v.Type.ConvToMap()
+	valueTypeKey := typedMap.KeyType
+	switch valueTypeKey.Kind() {
 	case String,
 		Int, Int8, Int16, Int32, Int64,
 		Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
@@ -530,10 +557,12 @@ func (d *decodeState) doMap(v Value) {
 	}
 
 	if v.IsNil() {
-		v.Set(MakeMap(v.Type))
+		m := makemap(v.Type, 0)
+		mapVal := Value{v.Type, m, Flag(Map)}
+		v.Set(mapVal)
 	}
 
-	mapElem := New(mapType.ElemType).Deref()
+	mapElem := internalNew(typedMap.ElemType)
 
 	// fill it out
 	for {
@@ -566,18 +595,16 @@ func (d *decodeState) doMap(v Value) {
 		}
 
 		if mapElem.IsValid() {
-			mapElem.Set(Zero(v.Type.ConvToMap().ElemType))
+			mapElem.Set(Zero(typedMap.ElemType))
 		}
 		// process it
 		d.process(mapElem)
 
-		// load it
-		valueTypeKey := v.Type.ConvToMap().KeyType
 		// Write value back to map; if using struct, corespValue points into struct already.
 		switch valueTypeKey.Kind() {
 		case String:
 			keyValue := ReflectOn(key).Convert(valueTypeKey)
-			v.SetMapIndex(keyValue, mapElem)
+			v.setMapIndex(typedMap, keyValue, mapElem)
 		case Int, Int8, Int16, Int32, Int64:
 			num, err := IntParse(key)
 			if err != nil || Zero(valueTypeKey).OverflowInt(num) {
@@ -585,7 +612,7 @@ func (d *decodeState) doMap(v Value) {
 				return
 			}
 			keyValue := ReflectOn(num).Convert(valueTypeKey)
-			v.SetMapIndex(keyValue, mapElem)
+			v.setMapIndex(typedMap, keyValue, mapElem)
 		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 			num, err := UintParse(key)
 			if err != nil || Zero(valueTypeKey).OverflowUint(num) {
@@ -593,7 +620,7 @@ func (d *decodeState) doMap(v Value) {
 				return
 			}
 			keyValue := ReflectOn(num).Convert(valueTypeKey)
-			v.SetMapIndex(keyValue, mapElem)
+			v.setMapIndex(typedMap, keyValue, mapElem)
 		}
 
 		// Next token must be , or }.
@@ -699,7 +726,7 @@ func (d *decodeState) doStruct(v Value) {
 					corespValue = corespValue.Deref()
 				}
 
-				corespValue = corespValue.Field(idx)
+				corespValue = corespValue.getField(idx)
 			}
 			d.errorContext.Field = string(curField.name)
 			d.errorContext.Struct = v.Type.Name()
@@ -758,7 +785,7 @@ func (d *decodeState) valueInterface() interface{} {
 		return d.literalInterface()
 	default:
 		d.error(errPhase)
-		panic("unreachable")
+		panic("Unreachable")
 	}
 }
 
