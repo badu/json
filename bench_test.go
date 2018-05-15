@@ -189,7 +189,7 @@ func BenchmarkCodeDecoder(b *testing.B) {
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
-		var buf bytes.Buffer
+		var buf Buffer
 		dec := NewDecoder(&buf)
 		var r codeResponse
 		for pb.Next() {
@@ -213,7 +213,7 @@ func BenchmarkOldCodeDecoder(b *testing.B) {
 		b.StartTimer()
 	}
 	b.RunParallel(func(pb *testing.PB) {
-		var buf bytes.Buffer
+		var buf Buffer
 		dec := json.NewDecoder(&buf)
 		var r codeResponse
 		for pb.Next() {
@@ -262,7 +262,7 @@ func BenchmarkOldUnicodeDecoder(b *testing.B) {
 
 func BenchmarkDecoderStream(b *testing.B) {
 	b.StopTimer()
-	var buf bytes.Buffer
+	var buf Buffer
 	dec := NewDecoder(&buf)
 	buf.WriteString(`"` + strings.Repeat("x", 1000000) + `"` + "\n\n\n")
 	var x interface{}
@@ -284,7 +284,7 @@ func BenchmarkDecoderStream(b *testing.B) {
 
 func BenchmarkOldDecoderStream(b *testing.B) {
 	b.StopTimer()
-	var buf bytes.Buffer
+	var buf Buffer
 	dec := json.NewDecoder(&buf)
 	buf.WriteString(`"` + strings.Repeat("x", 1000000) + `"` + "\n\n\n")
 	var x interface{}

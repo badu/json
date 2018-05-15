@@ -361,7 +361,7 @@ func NewSmallPayload() *SmallPayload {
 	}
 }
 
-func BenchmarkOldUnmarshalLarge(b *testing.B) {
+func _BenchmarkOldUnmarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -370,7 +370,7 @@ func BenchmarkOldUnmarshalLarge(b *testing.B) {
 	}
 }
 
-func BenchmarkNewUnmarshalLarge(b *testing.B) {
+func _BenchmarkNewUnmarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -379,7 +379,7 @@ func BenchmarkNewUnmarshalLarge(b *testing.B) {
 	}
 }
 
-func BenchmarkOldUnmarshalMedium(b *testing.B) {
+func _BenchmarkOldUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -388,7 +388,7 @@ func BenchmarkOldUnmarshalMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkNewUnmarshalMedium(b *testing.B) {
+func _BenchmarkNewUnmarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -397,7 +397,7 @@ func BenchmarkNewUnmarshalMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkOldUnmarshalSmall(b *testing.B) {
+func _BenchmarkOldUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -406,7 +406,7 @@ func BenchmarkOldUnmarshalSmall(b *testing.B) {
 	}
 }
 
-func BenchmarkNewUnmarshalSmall(b *testing.B) {
+func _BenchmarkNewUnmarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {

@@ -4,6 +4,9 @@ import (
 	"unsafe"
 )
 
+//go:linkname IndexByte bytes.IndexByte
+func IndexByte(s []byte, c byte) int
+
 // resolveNameOff resolves a name offset from a base pointer.
 //go:linkname resolveNameOff reflect.resolveNameOff
 func resolveNameOff(ptrInModule unsafe.Pointer, off int32) unsafe.Pointer

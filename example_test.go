@@ -7,7 +7,6 @@
 package json
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -279,8 +278,9 @@ func ExampleIndent() {
 		log.Fatal(err)
 	}
 
-	var out bytes.Buffer
+	var out Buffer
 	Indent(&out, b, "=", "\t")
+	out.Bytes() // force write peding byte
 	out.WriteTo(os.Stdout)
 	// Output:
 	// [

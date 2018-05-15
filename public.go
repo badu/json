@@ -7,7 +7,6 @@
 package json
 
 import (
-	"bytes"
 	"io"
 )
 
@@ -166,7 +165,7 @@ func Unmarshal(data []byte, target interface{}) error {
 // JSON cannot represent cyclic data structures and Marshal does not handle them. Passing cyclic structures to Marshal will result in an infinite recursion.
 //
 func Marshal(v interface{}) ([]byte, error) {
-	e := &encodeState{opts: encOpts{escapeHTML: true}}
+	e := encodeState{opts: encOpts{escapeHTML: true}}
 	err := e.marshal(v)
 	if err != nil {
 		return nil, err
@@ -176,7 +175,7 @@ func Marshal(v interface{}) ([]byte, error) {
 
 // Same as Marshal, but sets the flag to sort map keys while serializing
 func MarshalWithSortMap(v interface{}) ([]byte, error) {
-	e := &encodeState{opts: encOpts{escapeHTML: true, willSortMapKeys: true}}
+	e := encodeState{opts: encOpts{escapeHTML: true, willSortMapKeys: true}}
 	err := e.marshal(v)
 	if err != nil {
 		return nil, err
@@ -191,7 +190,7 @@ func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var buf bytes.Buffer
+	var buf Buffer
 	err = Indent(&buf, b, prefix, indent)
 	if err != nil {
 		return nil, err
@@ -201,7 +200,7 @@ func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error) {
 
 // HTMLEscape appends to dst the JSON-encoded src with <, >, &, U+2028 and U+2029 characters inside string literals changed to \u003c, \u003e, \u0026, \u2028, \u2029 so that the JSON will be safe to embed inside HTML <script> tags.
 // For historical reasons, web browsers don't honor standard HTML escaping within <script> tags, so an alternative JSON encoding must be used.
-func HTMLEscape(dst *bytes.Buffer, src []byte) {
+func HTMLEscape(dst *Buffer, src []byte) {
 	// The characters can only appear in string literals,
 	// so just scan the string one byte at a time.
 	start := 0
@@ -231,7 +230,7 @@ func HTMLEscape(dst *bytes.Buffer, src []byte) {
 }
 
 // Compact appends to dst the JSON-encoded src with insignificant space characters elided.
-func Compact(dst *bytes.Buffer, src []byte) error {
+func Compact(dst *Buffer, src []byte) error {
 	return compact(dst, src, false)
 }
 
@@ -241,7 +240,7 @@ func Compact(dst *bytes.Buffer, src []byte) error {
 // Although leading space characters (space, tab, carriage return, newline) at the beginning of src are dropped, trailing space characters at the end of src are preserved and copied to dst.
 // For example, if src has no trailing spaces, neither will dst;
 // if src ends in a trailing newline, so will dst.
-func Indent(dst *bytes.Buffer, src []byte, prefix, indent string) error {
+func Indent(dst *Buffer, src []byte, prefix, indent string) error {
 	origLen := dst.Len()
 	var scan scanner
 	scan.reset()
@@ -298,6 +297,9 @@ func Indent(dst *bytes.Buffer, src []byte, prefix, indent string) error {
 			dst.WriteByte(c)
 		}
 	}
+
+	dst.Bytes() // force write any peding byte
+
 	if scan.eof() == scanError {
 		dst.Truncate(origLen)
 		return scan.err

@@ -18,51 +18,119 @@ import (
 	"unicode/utf8"
 )
 
-func (e *encodeState) stringBytes(s []byte) {
+// NOTE: keep in sync with stringBytes below.
+func (e *encodeState) string(name string) {
 	e.WriteByte(quote)
 	start := 0
-	for i := 0; i < len(s); {
-		if s[i] < utf8.RuneSelf {
-			if htmlSafeSet[s[i]] || (!e.opts.escapeHTML && safeSet[s[i]]) {
+	for i := 0; i < len(name); {
+		if run := name[i]; run < utf8.RuneSelf {
+			if htmlSafeSet[run] || (!e.opts.escapeHTML && safeSet[run]) {
 				i++
 				continue
 			}
 			if start < i {
-				e.Write(s[start:i])
+				e.WriteString(name[start:i])
 			}
-			switch s[i] {
+			switch run {
 			case backSlash, quote:
-				e.WriteByte(backSlash)
-				e.WriteByte(s[i])
+				e.WriteBytes(backSlash, run)
 			case newLine:
-				e.WriteByte(backSlash)
-				e.WriteByte(nChr)
+				e.WriteBytes(backSlash, nChr)
 			case retChar:
-				e.WriteByte(backSlash)
-				e.WriteByte(rChr)
+				e.WriteBytes(backSlash, rChr)
 			case tab:
-				e.WriteByte(backSlash)
-				e.WriteByte(tChr)
+				e.WriteBytes(backSlash, tChr)
 			default:
 				// This encodes bytes < 0x20 except for \t, \n and \r.
 				// If escapeHTML is set, it also escapes <, >, and &
 				// because they can lead to security holes when
 				// user-controlled strings are rendered into JSON
 				// and served to some browsers.
-				e.WriteString(`\u00`)
-				e.WriteByte(hex[s[i]>>4])
-				e.WriteByte(hex[s[i]&0xF])
+				e.WriteBytes(backSlash, uChr, zero, zero, hex[run>>4], hex[run&0xF])
 			}
 			i++
 			start = i
 			continue
 		}
+		c, size := utf8.DecodeRuneInString(name[i:])
+		if c == utf8.RuneError && size == 1 {
+			if start < i {
+				e.WriteString(name[start:i])
+			}
+			e.WriteBytes(backSlash, uChr, fChr, fChr, fChr, dChr)
+			i += size
+			start = i
+			continue
+		}
+		// U+2028 is LINE SEPARATOR.
+		// U+2029 is PARAGRAPH SEPARATOR.
+		// They are both technically valid characters in JSON strings, but don't work in JSONP, which has to be evaluated as JavaScript, and can lead to security holes there. It is valid JSON to escape them, so we do so unconditionally.
+		// See http://timelessrepo.com/json-isnt-a-javascript-subset for discussion.
+		if c == '\u2028' || c == '\u2029' {
+			if start < i {
+				e.WriteString(name[start:i])
+			}
+			e.WriteBytes(backSlash, uChr, two, zero, two, hex[c&0xF])
+			i += size
+			start = i
+			continue
+		}
+		i += size
+	}
+
+	if start < len(name) {
+		e.WriteString(name[start:])
+	}
+
+	e.WriteByte(quote)
+}
+
+func (e *encodeState) stringBytes(s []byte) {
+	e.WriteByte(quote)
+
+	start := 0
+	for i := 0; i < len(s); {
+		// normal rune
+		if s[i] < utf8.RuneSelf {
+			if htmlSafeSet[s[i]] || (!e.opts.escapeHTML && safeSet[s[i]]) {
+				i++
+				continue
+			}
+			// unsafe rune detected
+			if start < i {
+				// writing what we have so far...
+				e.Write(s[start:i])
+			}
+			switch s[i] {
+			case backSlash, quote:
+				e.WriteBytes(backSlash, s[i])
+			case newLine:
+				e.WriteBytes(backSlash, nChr)
+			case retChar:
+				e.WriteBytes(backSlash, rChr)
+			case tab:
+				e.WriteBytes(backSlash, tChr)
+			default:
+				// This encodes bytes < 0x20 except for \t, \n and \r.
+				// If escapeHTML is set, it also escapes <, >, and &
+				// because they can lead to security holes when
+				// user-controlled strings are rendered into JSON
+				// and served to some browsers.
+				e.WriteBytes(backSlash, uChr, zero, zero, hex[s[i]>>4], hex[s[i]&0xF])
+			}
+			// set new start and continue looking for runes
+			i++
+			start = i
+			continue
+		}
+
+		// special rune
 		c, size := utf8.DecodeRune(s[i:])
 		if c == utf8.RuneError && size == 1 {
 			if start < i {
 				e.Write(s[start:i])
 			}
-			e.WriteString(`\ufffd`)
+			e.WriteBytes(backSlash, uChr, fChr, fChr, fChr, dChr)
 			i += size
 			start = i
 			continue
@@ -78,17 +146,18 @@ func (e *encodeState) stringBytes(s []byte) {
 			if start < i {
 				e.Write(s[start:i])
 			}
-			e.WriteString(`\u202`)
-			e.WriteByte(hex[c&0xF])
+			e.WriteBytes(backSlash, uChr, two, zero, two, hex[c&0xF])
 			i += size
 			start = i
 			continue
 		}
 		i += size
 	}
+
 	if start < len(s) {
 		e.Write(s[start:])
 	}
+
 	e.WriteByte(quote)
 }
 
@@ -104,13 +173,9 @@ func (e *encodeState) marshal(v interface{}) (err error) {
 			err = r.(error)
 		}
 	}()
-	//walk(e, ReflectOn(v))
-	e.reflectValue(ReflectOn(v))
+	value := ReflectOn(v)
+	valueEncoder(value)(e, value)
 	return nil
-}
-
-func (e *encodeState) reflectValue(v Value) {
-	valueEncoder(v)(e, v)
 }
 
 func (e *encodeState) error(err error) {
@@ -163,36 +228,34 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 }
 
 func boolEncoder(e *encodeState, v Value) {
-	if e.opts.quoted {
-		e.WriteByte(quote)
-	}
 	if *(*bool)(v.Ptr) {
-		e.Write(trueLiteral)
+		if e.opts.quoted {
+			e.WriteQuoted(trueLiteral)
+		} else {
+			e.Write(trueLiteral)
+		}
 	} else {
-		e.Write(falseLiteral)
-	}
-	if e.opts.quoted {
-		e.WriteByte(quote)
+		if e.opts.quoted {
+			e.WriteQuoted(falseLiteral)
+		} else {
+			e.Write(falseLiteral)
+		}
 	}
 }
 
 func intEncoder(e *encodeState, v Value) {
 	if e.opts.quoted {
-		e.WriteByte(quote)
-	}
-	e.Write(FormatInt(v.Int()))
-	if e.opts.quoted {
-		e.WriteByte(quote)
+		e.WriteQuoted(FormatInt(v.Int()))
+	} else {
+		e.Write(FormatInt(v.Int()))
 	}
 }
 
 func uintEncoder(e *encodeState, v Value) {
 	if e.opts.quoted {
-		e.WriteByte(quote)
-	}
-	e.Write(FormatUint(v.Uint()))
-	if e.opts.quoted {
-		e.WriteByte(quote)
+		e.WriteQuoted(FormatUint(v.Uint()))
+	} else {
+		e.Write(FormatUint(v.Uint()))
 	}
 }
 
@@ -227,11 +290,9 @@ func float32Encoder(e *encodeState, v Value) {
 	}
 
 	if e.opts.quoted {
-		e.WriteByte(quote)
-	}
-	e.Write(b)
-	if e.opts.quoted {
-		e.WriteByte(quote)
+		e.WriteQuoted(b)
+	} else {
+		e.Write(b)
 	}
 }
 
@@ -264,11 +325,9 @@ func float64Encoder(e *encodeState, v Value) {
 	}
 
 	if e.opts.quoted {
-		e.WriteByte(quote)
-	}
-	e.Write(b)
-	if e.opts.quoted {
-		e.WriteByte(quote)
+		e.WriteQuoted(b)
+	} else {
+		e.Write(b)
 	}
 }
 
@@ -291,8 +350,7 @@ func stringEncoder(e *encodeState, v Value) {
 			}
 			e.stringBytes(sb)
 		} else {
-			bStr := []byte(theStr)
-			e.stringBytes(bStr)
+			e.string(theStr)
 		}
 	}
 }
@@ -302,7 +360,8 @@ func interfaceEncoder(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-	e.reflectValue(v.Iface())
+	value := v.Iface()
+	valueEncoder(value)(e, value)
 }
 
 func invalidValueEncoder(e *encodeState, _ Value) {
@@ -320,20 +379,20 @@ func encodeByteSlice(e *encodeState, v Value) {
 		return
 	}
 
-	e.WriteByte(quote)
 	value := *(*[]byte)(v.Ptr)
 	if len(value) < 1024 {
 		// for small buffers, using Encode directly is much faster.
 		dst := make([]byte, base64.StdEncoding.EncodedLen(len(value)))
 		base64.StdEncoding.Encode(dst, value)
-		e.Write(dst)
+		e.WriteQuoted(dst)
 	} else {
+		e.WriteByte(quote)
 		// for large buffers, avoid unnecessary extra temporary buffer space.
 		enc := base64.NewEncoder(base64.StdEncoding, e)
 		enc.Write(value)
 		enc.Close()
+		e.WriteByte(quote)
 	}
-	e.WriteByte(quote)
 }
 
 func newCondAddrEncoder(canAddrEnc, elseEnc encoderFunc) encoderFunc {
@@ -518,6 +577,7 @@ func (se *cStructEncoder) encode(e *encodeState, v Value) {
 		e.WriteByte(colon)
 		e.opts.quoted = curField.isBasic
 		se.fieldEncs[i](e, fieldValue)
+
 	}
 
 	//Mark Struct End
@@ -726,25 +786,23 @@ func getCachedFields(typ *RType) marshalFields {
 	return fieldsInfo
 }
 
-func typeByIndex(t *RType, indexes []int) *RType {
-	for _, i := range indexes {
-		if t.Kind() == Ptr {
-			t = t.Deref()
-		}
-		field := &t.convToStruct().fields[i]
-		t = field.Type
-	}
-	return t
-}
-
 func newStructEncoder(t *RType) encoderFunc {
 	fieldsInfo := getCachedFields(t)
-	se := &cStructEncoder{
+	se := cStructEncoder{
 		fields:    fieldsInfo,
 		fieldEncs: make([]encoderFunc, len(fieldsInfo)),
 	}
+
 	for i, curField := range fieldsInfo {
-		se.fieldEncs[i] = typeEncoder(typeByIndex(t, curField.indexes))
+		et := t
+		for _, index := range curField.indexes {
+			if et.Kind() == Ptr {
+				et = et.Deref()
+			}
+			field := &(*structType)(ptr(et)).fields[index]
+			et = field.Type
+		}
+		se.fieldEncs[i] = typeEncoder(et)
 	}
 	return se.encode
 }
@@ -760,17 +818,17 @@ func newSliceEncoder(t *RType) encoderFunc {
 			return encodeByteSlice
 		}
 	}
-	enc := &cSliceEncoder{newArrayEncoder(t)}
+	enc := cSliceEncoder{newArrayEncoder(t)}
 	return enc.encode
 }
 
 func newArrayEncoder(t *RType) encoderFunc {
 	switch t.Kind() {
 	case Array:
-		enc := &cArrayEncoder{elemEnc: typeEncoder(t.ConvToArray().ElemType), elemType: t.ConvToArray().ElemType}
+		enc := cArrayEncoder{elemEnc: typeEncoder(t.ConvToArray().ElemType), elemType: t.ConvToArray().ElemType}
 		return enc.encode
 	case Slice:
-		enc := &cArrayEncoder{elemEnc: typeEncoder(t.ConvToSlice().ElemType), elemType: t.ConvToSlice().ElemType}
+		enc := cArrayEncoder{elemEnc: typeEncoder(t.ConvToSlice().ElemType), elemType: t.ConvToSlice().ElemType}
 		return enc.encode
 	default:
 		panic("Not Array, nor Slice")
@@ -778,7 +836,7 @@ func newArrayEncoder(t *RType) encoderFunc {
 }
 
 func newPtrEncoder(t *RType) encoderFunc {
-	enc := &cPtrEncoder{typeEncoder(t.Deref())}
+	enc := cPtrEncoder{typeEncoder(t.Deref())}
 	return enc.encode
 }
 
@@ -792,7 +850,7 @@ func newMapEncoder(t *RType) encoderFunc {
 		return unsupportedTypeEncoder
 
 	}
-	me := &cMapEncoder{elemEnc: typeEncoder(mapInfo.ElemType), mapElemType: mapInfo.ElemType}
+	me := cMapEncoder{elemEnc: typeEncoder(mapInfo.ElemType), mapElemType: mapInfo.ElemType}
 	return me.encode
 }
 
