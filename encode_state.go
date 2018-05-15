@@ -174,7 +174,11 @@ func (e *encodeState) marshal(v interface{}) (err error) {
 		}
 	}()
 	value := ReflectOn(v)
-	valueEncoder(value)(e, value)
+	if !value.IsValid() {
+		invalidValueEncoder(e, value)
+		return
+	}
+	typeEncoder(value.Type)(e, value)
 	return nil
 }
 
@@ -193,6 +197,7 @@ func marshalerEncoder(e *encodeState, v Value) {
 	}
 	m, ok := v.valueInterface().(Marshaler)
 	if !ok {
+		// TODO : signal error
 		e.Write(nullLiteral)
 		return
 	}
@@ -216,7 +221,12 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 		e.error(errors.New("Invalid value while calling [addr] Marshal"))
 		return
 	}
-	m := va.valueInterface().(Marshaler)
+	m, ok := va.valueInterface().(Marshaler)
+	if !ok {
+		// TODO : signal error
+		e.Write(nullLiteral)
+		return
+	}
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
@@ -361,7 +371,11 @@ func interfaceEncoder(e *encodeState, v Value) {
 		return
 	}
 	value := v.Iface()
-	valueEncoder(value)(e, value)
+	if !value.IsValid() {
+		invalidValueEncoder(e, value)
+		return
+	}
+	typeEncoder(value.Type)(e, value)
 }
 
 func invalidValueEncoder(e *encodeState, _ Value) {
@@ -395,36 +409,36 @@ func encodeByteSlice(e *encodeState, v Value) {
 	}
 }
 
-func newCondAddrEncoder(canAddrEnc, elseEnc encoderFunc) encoderFunc {
-	enc := &condAddrEncoder{canAddrEnc: canAddrEnc, elseEnc: elseEnc}
-	return enc.encode
+func newCondAddrEncoder(elseEnc encoderFunc) encoderFunc {
+	enc := allEncoder{encs: encFns{elseEnc}}
+	return enc.encodeCond
 }
 
-func (ce *condAddrEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodeCond(e *encodeState, v Value) {
 	if v.CanAddr() {
-		ce.canAddrEnc(e, v)
+		addrMarshalerEncoder(e, v)
 	} else {
-		ce.elseEnc(e, v)
+		ae.encs[0](e, v)
 	}
 }
 
-func (pe *cPtrEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 	if v.IsNil() {
 		e.Write(nullLiteral)
 		return
 	}
-	pe.elemEnc(e, v.Deref())
+	ae.encs[0](e, v.Deref())
 }
 
-func (se *cSliceEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodeSlice(e *encodeState, v Value) {
 	if v.IsNil() {
 		e.Write(nullLiteral)
 		return
 	}
-	se.arrayEnc(e, v)
+	ae.encs[0](e, v)
 }
 
-func (ae *cArrayEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 	// Mark Array Start
 	e.WriteByte(squareOpen)
 	arrLen := 0
@@ -451,23 +465,23 @@ func (ae *cArrayEncoder) encode(e *encodeState, v Value) {
 		}
 		if isSlice {
 			daVal.Ptr = arrayAt(slcHeader.Data, i, ae.elemType.size)
-			ae.elemEnc(e, daVal)
+			ae.encs[0](e, daVal)
 		} else {
 			daVal.Ptr = add(v.Ptr, uintptr(i)*ae.elemType.size)
-			ae.elemEnc(e, daVal)
+			ae.encs[0](e, daVal)
 		}
 	}
 	// Mark Array End
 	e.WriteByte(squareClose)
 }
 
-func (se *cStructEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 
 	// Mark Struct Start
 	e.WriteByte(curlOpen)
 
 	first := true
-	for i, curField := range se.fields {
+	for i, curField := range ae.fields {
 		// restoring to original value type, since it gets altered below
 		fieldValue := v
 
@@ -576,7 +590,7 @@ func (se *cStructEncoder) encode(e *encodeState, v Value) {
 		e.stringBytes(curField.name)
 		e.WriteByte(colon)
 		e.opts.quoted = curField.isBasic
-		se.fieldEncs[i](e, fieldValue)
+		ae.encs[i](e, fieldValue)
 
 	}
 
@@ -584,14 +598,14 @@ func (se *cStructEncoder) encode(e *encodeState, v Value) {
 	e.WriteByte(curlClose)
 }
 
-func (me *cMapEncoder) encode(e *encodeState, v Value) {
+func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 	if v.IsNil() {
 		// Write "null"
 		e.Write(nullLiteral)
 		return
 	}
 	// prepare easy access
-	fl := v.ro() | Flag(me.mapElemType.Kind())
+	fl := v.ro() | Flag(ae.elemType.Kind())
 	vPointer := v.pointer()
 
 	// prepare map keys
@@ -648,7 +662,7 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 			return false
 		})
 		// doesn't seem to help much, but we're reusing it anyway
-		daVal := Value{Type: me.mapElemType}
+		daVal := Value{Type: ae.elemType}
 		for j, key := range result {
 			if j > 0 {
 				e.WriteByte(comma)
@@ -664,17 +678,17 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 			}
 			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 			if elemPtr != nil {
-				if me.mapElemType.isDirectIface() {
+				if ae.elemType.isDirectIface() {
 					// Copy result so future changes to the map won't change the underlying value.
-					mapElemValue := unsafeNew(me.mapElemType)
-					typedmemmove(me.mapElemType, mapElemValue, elemPtr)
+					mapElemValue := unsafeNew(ae.elemType)
+					typedmemmove(ae.elemType, mapElemValue, elemPtr)
 					daVal.Ptr = mapElemValue
 					daVal.Flag = fl | pointerFlag | key.value.ro()
-					me.elemEnc(e, daVal)
+					ae.encs[0](e, daVal)
 				} else {
 					daVal.Ptr = convPtr(elemPtr)
 					daVal.Flag = fl | key.value.ro()
-					me.elemEnc(e, daVal)
+					ae.encs[0](e, daVal)
 				}
 			} else {
 				panic("elemPtr == nil")
@@ -744,13 +758,13 @@ func (me *cMapEncoder) encode(e *encodeState, v Value) {
 		}
 		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 		if elemPtr != nil {
-			if me.mapElemType.isDirectIface() {
+			if ae.elemType.isDirectIface() {
 				// Copy result so future changes to the map won't change the underlying value.
-				mapElemValue := unsafeNew(me.mapElemType)
-				typedmemmove(me.mapElemType, mapElemValue, elemPtr)
-				me.elemEnc(e, Value{Type: me.mapElemType, Ptr: mapElemValue, Flag: fl | pointerFlag | key.ro()})
+				mapElemValue := unsafeNew(ae.elemType)
+				typedmemmove(ae.elemType, mapElemValue, elemPtr)
+				ae.encs[0](e, Value{Type: ae.elemType, Ptr: mapElemValue, Flag: fl | pointerFlag | key.ro()})
 			} else {
-				me.elemEnc(e, Value{Type: me.mapElemType, Ptr: convPtr(elemPtr), Flag: fl | key.ro()})
+				ae.encs[0](e, Value{Type: ae.elemType, Ptr: convPtr(elemPtr), Flag: fl | key.ro()})
 			}
 		} else {
 			panic("elemPtr == nil")
@@ -767,7 +781,7 @@ func getCachedFields(typ *RType) marshalFields {
 	if fieldsInfo == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fieldsInfo = typ.getMarshalFields()
+		fieldsInfo = getMarshalFields(typ)
 		if fieldsInfo != nil {
 			fieldsCache.mu.Lock()
 			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
@@ -788,9 +802,9 @@ func getCachedFields(typ *RType) marshalFields {
 
 func newStructEncoder(t *RType) encoderFunc {
 	fieldsInfo := getCachedFields(t)
-	se := cStructEncoder{
-		fields:    fieldsInfo,
-		fieldEncs: make([]encoderFunc, len(fieldsInfo)),
+	se := allEncoder{
+		fields: fieldsInfo,
+		encs:   make([]encoderFunc, len(fieldsInfo)),
 	}
 
 	for i, curField := range fieldsInfo {
@@ -802,9 +816,9 @@ func newStructEncoder(t *RType) encoderFunc {
 			field := &(*structType)(ptr(et)).fields[index]
 			et = field.Type
 		}
-		se.fieldEncs[i] = typeEncoder(et)
+		se.encs[i] = typeEncoder(et)
 	}
-	return se.encode
+	return se.encodeStruct
 }
 
 func newSliceEncoder(t *RType) encoderFunc {
@@ -818,26 +832,26 @@ func newSliceEncoder(t *RType) encoderFunc {
 			return encodeByteSlice
 		}
 	}
-	enc := cSliceEncoder{newArrayEncoder(t)}
-	return enc.encode
+	enc := allEncoder{encs: encFns{newArrayEncoder(t)}}
+	return enc.encodeSlice
 }
 
 func newArrayEncoder(t *RType) encoderFunc {
 	switch t.Kind() {
 	case Array:
-		enc := cArrayEncoder{elemEnc: typeEncoder(t.ConvToArray().ElemType), elemType: t.ConvToArray().ElemType}
-		return enc.encode
+		enc := allEncoder{encs: encFns{typeEncoder(t.ConvToArray().ElemType)}, elemType: t.ConvToArray().ElemType}
+		return enc.encodeArray
 	case Slice:
-		enc := cArrayEncoder{elemEnc: typeEncoder(t.ConvToSlice().ElemType), elemType: t.ConvToSlice().ElemType}
-		return enc.encode
+		enc := allEncoder{encs: encFns{typeEncoder(t.ConvToSlice().ElemType)}, elemType: t.ConvToSlice().ElemType}
+		return enc.encodeArray
 	default:
 		panic("Not Array, nor Slice")
 	}
 }
 
 func newPtrEncoder(t *RType) encoderFunc {
-	enc := cPtrEncoder{typeEncoder(t.Deref())}
-	return enc.encode
+	enc := allEncoder{encs: encFns{typeEncoder(t.Deref())}}
+	return enc.encodePtr
 }
 
 func newMapEncoder(t *RType) encoderFunc {
@@ -850,15 +864,8 @@ func newMapEncoder(t *RType) encoderFunc {
 		return unsupportedTypeEncoder
 
 	}
-	me := cMapEncoder{elemEnc: typeEncoder(mapInfo.ElemType), mapElemType: mapInfo.ElemType}
-	return me.encode
-}
-
-func valueEncoder(v Value) encoderFunc {
-	if !v.IsValid() {
-		return invalidValueEncoder
-	}
-	return typeEncoder(v.Type)
+	me := allEncoder{encs: encFns{typeEncoder(mapInfo.ElemType)}, elemType: mapInfo.ElemType}
+	return me.encodeMap
 }
 
 func typeEncoder(t *RType) encoderFunc {
@@ -898,7 +905,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 	}
 	if t.Kind() != Ptr && allowAddr {
 		if t.PtrTo().implements(marshalerType) {
-			return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
+			return newCondAddrEncoder(newTypeEncoder(t, false))
 		}
 	}
 
@@ -934,7 +941,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 
 // getMarshalFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct and then any reachable anonymous structs.
-func (t *RType) getMarshalFields() marshalFields {
+func getMarshalFields(t *RType) marshalFields {
 	// Embedded fields to explore at the current level and the next.
 	var fields []visitField
 	next := []visitField{{Type: t}}

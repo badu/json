@@ -326,31 +326,10 @@ type (
 	encoderFunc func(e *encodeState, v Value)
 	encFns      []encoderFunc
 
-	cPtrEncoder struct {
-		elemEnc encoderFunc
-	}
-
-	cMapEncoder struct {
-		elemEnc     encoderFunc
-		mapElemType *RType
-	}
-
-	cSliceEncoder struct {
-		arrayEnc encoderFunc
-	}
-
-	cArrayEncoder struct {
-		elemEnc  encoderFunc
+	allEncoder struct {
+		fields   marshalFields
+		encs     encFns
 		elemType *RType
-	}
-
-	cStructEncoder struct {
-		fields    marshalFields
-		fieldEncs encFns
-	}
-
-	condAddrEncoder struct {
-		canAddrEnc, elseEnc encoderFunc
 	}
 )
 

@@ -640,7 +640,7 @@ func (d *decodeState) getFieldNamed(value Value, fieldName []byte) *MarshalField
 	if fields == nil {
 		// Compute fields without lock.
 		// Might duplicate effort but won't hold other computations back.
-		fields = value.Type.getMarshalFields()
+		fields = getMarshalFields(value.Type)
 		if fields == nil {
 			//fields = unmarshalFields{}
 			return nil
