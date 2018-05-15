@@ -570,17 +570,16 @@ func (v Value) Iface() Value {
 		// unpackEface converts the empty interface 'eface' to a Value.
 		e := toIface(ptr(&eface))
 		// NOTE: don't read e.word until we know whether it is really a pointer or not.
-		t := e.Type
-		if t == nil {
+		if e.Type == nil {
 			panic("Invalid IFACE")
 			// it's invalid
 			return Value{}
 		}
-		f := Flag(t.Kind())
-		if t.isDirectIface() {
+		f := Flag(e.Type.Kind())
+		if e.Type.isDirectIface() {
 			f |= pointerFlag
 		}
-		x := Value{Type: t, Ptr: e.word, Flag: f}
+		x := Value{Type: e.Type, Ptr: e.word, Flag: f}
 		if x.IsValid() {
 			x.Flag |= v.ro()
 		}

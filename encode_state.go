@@ -365,27 +365,6 @@ func stringEncoder(e *encodeState, v Value) {
 	}
 }
 
-func interfaceEncoder(e *encodeState, v Value) {
-	if v.IsNil() {
-		e.Write(nullLiteral)
-		return
-	}
-	value := v.Iface()
-	if !value.IsValid() {
-		invalidValueEncoder(e, value)
-		return
-	}
-	typeEncoder(value.Type)(e, value)
-}
-
-func invalidValueEncoder(e *encodeState, _ Value) {
-	e.Write(nullLiteral)
-}
-
-func unsupportedTypeEncoder(e *encodeState, v Value) {
-	e.error(&UnsupportedTypeError{v.Type})
-}
-
 func encodeByteSlice(e *encodeState, v Value) {
 	if v.IsNil() {
 		// write "null"
@@ -409,9 +388,25 @@ func encodeByteSlice(e *encodeState, v Value) {
 	}
 }
 
-func newCondAddrEncoder(elseEnc encoderFunc) encoderFunc {
-	enc := allEncoder{encs: encFns{elseEnc}}
-	return enc.encodeCond
+func interfaceEncoder(e *encodeState, v Value) {
+	if v.IsNil() {
+		e.Write(nullLiteral)
+		return
+	}
+	value := v.Iface()
+	if !value.IsValid() {
+		invalidValueEncoder(e, value)
+		return
+	}
+	typeEncoder(value.Type)(e, value)
+}
+
+func invalidValueEncoder(e *encodeState, _ Value) {
+	e.Write(nullLiteral)
+}
+
+func unsupportedTypeEncoder(e *encodeState, v Value) {
+	e.error(&UnsupportedTypeError{v.Type})
 }
 
 func (ae *allEncoder) encodeCond(e *encodeState, v Value) {
@@ -427,7 +422,21 @@ func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-	ae.encs[0](e, v.Deref())
+	// short version of Deref, for reusing value
+	ptrToV := v.Ptr
+	if v.isPointer() {
+		ptrToV = convPtr(ptrToV)
+	}
+	// The returned value's address is v's value.
+	if ptrToV == nil {
+		panic("Pointer nil. shouldn't happen! ever!")
+	}
+	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
+	typ := v.Type.Deref()
+	v.Type = typ
+	v.Ptr = ptrToV
+	v.Flag = v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
+	ae.encs[0](e, v)
 }
 
 func (ae *allEncoder) encodeSlice(e *encodeState, v Value) {
@@ -465,11 +474,10 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 		}
 		if isSlice {
 			daVal.Ptr = arrayAt(slcHeader.Data, i, ae.elemType.size)
-			ae.encs[0](e, daVal)
 		} else {
 			daVal.Ptr = add(v.Ptr, uintptr(i)*ae.elemType.size)
-			ae.encs[0](e, daVal)
 		}
+		ae.encs[0](e, daVal)
 	}
 	// Mark Array End
 	e.WriteByte(squareClose)
@@ -684,12 +692,11 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 					typedmemmove(ae.elemType, mapElemValue, elemPtr)
 					daVal.Ptr = mapElemValue
 					daVal.Flag = fl | pointerFlag | key.value.ro()
-					ae.encs[0](e, daVal)
 				} else {
 					daVal.Ptr = convPtr(elemPtr)
 					daVal.Flag = fl | key.value.ro()
-					ae.encs[0](e, daVal)
 				}
+				ae.encs[0](e, daVal)
 			} else {
 				panic("elemPtr == nil")
 			}
@@ -714,6 +721,8 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		}
 		break
 	}
+	// doesn't seem to help much, but we're reusing it anyway
+	daVal := Value{Type: ae.elemType}
 	// default, unsorted map keys
 	for i, key := range mapKeys {
 		var keyName []byte
@@ -762,10 +771,13 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 				// Copy result so future changes to the map won't change the underlying value.
 				mapElemValue := unsafeNew(ae.elemType)
 				typedmemmove(ae.elemType, mapElemValue, elemPtr)
-				ae.encs[0](e, Value{Type: ae.elemType, Ptr: mapElemValue, Flag: fl | pointerFlag | key.ro()})
+				daVal.Ptr = mapElemValue
+				daVal.Flag = fl | pointerFlag | key.ro()
 			} else {
-				ae.encs[0](e, Value{Type: ae.elemType, Ptr: convPtr(elemPtr), Flag: fl | key.ro()})
+				daVal.Ptr = convPtr(elemPtr)
+				daVal.Flag = fl | key.ro()
 			}
+			ae.encs[0](e, daVal)
 		} else {
 			panic("elemPtr == nil")
 		}
@@ -800,7 +812,73 @@ func getCachedFields(typ *RType) marshalFields {
 	return fieldsInfo
 }
 
-func newStructEncoder(t *RType) encoderFunc {
+// newTypeEncoder constructs an encoderFunc for a type.
+// The returned encoder only checks CanAddr when allowAddr is true.
+func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
+	if t.implements(marshalerType) {
+		return marshalerEncoder
+	}
+	if t.Kind() != Ptr && allowAddr {
+		if t.PtrTo().implements(marshalerType) {
+			return newCondAddrEncoder(newTypeEncoder(t, false)).encodeCond
+		}
+	}
+
+	switch t.Kind() {
+	case Bool:
+		return boolEncoder
+	case Int, Int8, Int16, Int32, Int64:
+		return intEncoder
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+		return uintEncoder
+	case Float32:
+		return float32Encoder
+	case Float64:
+		return float64Encoder
+	case String:
+		return stringEncoder
+	case Interface:
+		return interfaceEncoder
+	case Struct:
+		enc := newStructEncoder(t)
+		return enc.encodeStruct
+	case Map:
+		mapInfo := t.ConvToMap()
+		switch mapInfo.KeyType.Kind() {
+		case String,
+			Int, Int8, Int16, Int32, Int64,
+			Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+		default:
+			return unsupportedTypeEncoder
+
+		}
+		return newMapEncoder(t).encodeMap
+	case Slice:
+		// read the slice element
+		elemType := t.ConvToSlice().ElemType
+		// Byte slices get special treatment; arrays don't.
+		if elemType.Kind() == Uint8 {
+			ptrToDeref := elemType.PtrTo()
+			// check if []int8 has it's own marshal implementation
+			if !ptrToDeref.implements(marshalerType) {
+				return encodeByteSlice
+			}
+		}
+		return newSliceEncoder(t).encodeSlice
+	case Array:
+		return newArrayEncoder(t).encodeArray
+	case Ptr:
+		return newPtrEncoder(t).encodePtr
+	default:
+		return unsupportedTypeEncoder
+	}
+}
+
+func newCondAddrEncoder(elseEnc encoderFunc) *allEncoder {
+	return &allEncoder{encs: encFns{elseEnc}}
+}
+
+func newStructEncoder(t *RType) *allEncoder {
 	fieldsInfo := getCachedFields(t)
 	se := allEncoder{
 		fields: fieldsInfo,
@@ -813,59 +891,38 @@ func newStructEncoder(t *RType) encoderFunc {
 			if et.Kind() == Ptr {
 				et = et.Deref()
 			}
-			field := &(*structType)(ptr(et)).fields[index]
+			st := (*structType)(ptr(et))
+			field := &st.fields[index]
 			et = field.Type
 		}
 		se.encs[i] = typeEncoder(et)
 	}
-	return se.encodeStruct
+	return &se
 }
 
-func newSliceEncoder(t *RType) encoderFunc {
-	// read the slice element
-	elemType := t.ConvToSlice().ElemType
-	// Byte slices get special treatment; arrays don't.
-	if elemType.Kind() == Uint8 {
-		ptrToDeref := elemType.PtrTo()
-		// check if []int8 has it's own marshal implementation
-		if !ptrToDeref.implements(marshalerType) {
-			return encodeByteSlice
-		}
-	}
-	enc := allEncoder{encs: encFns{newArrayEncoder(t)}}
-	return enc.encodeSlice
+func newSliceEncoder(t *RType) *allEncoder {
+	aenc := newArrayEncoder(t).encodeArray
+	return &allEncoder{encs: encFns{aenc}}
 }
 
-func newArrayEncoder(t *RType) encoderFunc {
+func newArrayEncoder(t *RType) *allEncoder {
 	switch t.Kind() {
 	case Array:
-		enc := allEncoder{encs: encFns{typeEncoder(t.ConvToArray().ElemType)}, elemType: t.ConvToArray().ElemType}
-		return enc.encodeArray
+		return &allEncoder{encs: encFns{typeEncoder(t.ConvToArray().ElemType)}, elemType: t.ConvToArray().ElemType}
 	case Slice:
-		enc := allEncoder{encs: encFns{typeEncoder(t.ConvToSlice().ElemType)}, elemType: t.ConvToSlice().ElemType}
-		return enc.encodeArray
+		return &allEncoder{encs: encFns{typeEncoder(t.ConvToSlice().ElemType)}, elemType: t.ConvToSlice().ElemType}
 	default:
 		panic("Not Array, nor Slice")
 	}
 }
 
-func newPtrEncoder(t *RType) encoderFunc {
-	enc := allEncoder{encs: encFns{typeEncoder(t.Deref())}}
-	return enc.encodePtr
+func newPtrEncoder(t *RType) *allEncoder {
+	return &allEncoder{encs: encFns{typeEncoder(t.Deref())}}
 }
 
-func newMapEncoder(t *RType) encoderFunc {
+func newMapEncoder(t *RType) *allEncoder {
 	mapInfo := t.ConvToMap()
-	switch mapInfo.KeyType.Kind() {
-	case String,
-		Int, Int8, Int16, Int32, Int64,
-		Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-	default:
-		return unsupportedTypeEncoder
-
-	}
-	me := allEncoder{encs: encFns{typeEncoder(mapInfo.ElemType)}, elemType: mapInfo.ElemType}
-	return me.encodeMap
+	return &allEncoder{encs: encFns{typeEncoder(mapInfo.ElemType)}, elemType: mapInfo.ElemType}
 }
 
 func typeEncoder(t *RType) encoderFunc {
@@ -895,48 +952,6 @@ func typeEncoder(t *RType) encoderFunc {
 	wg.Done()
 	encoderCache.Store(t, f)
 	return f
-}
-
-// newTypeEncoder constructs an encoderFunc for a type.
-// The returned encoder only checks CanAddr when allowAddr is true.
-func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
-	if t.implements(marshalerType) {
-		return marshalerEncoder
-	}
-	if t.Kind() != Ptr && allowAddr {
-		if t.PtrTo().implements(marshalerType) {
-			return newCondAddrEncoder(newTypeEncoder(t, false))
-		}
-	}
-
-	switch t.Kind() {
-	case Bool:
-		return boolEncoder
-	case Int, Int8, Int16, Int32, Int64:
-		return intEncoder
-	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-		return uintEncoder
-	case Float32:
-		return float32Encoder
-	case Float64:
-		return float64Encoder
-	case String:
-		return stringEncoder
-	case Interface:
-		return interfaceEncoder
-	case Struct:
-		return newStructEncoder(t)
-	case Map:
-		return newMapEncoder(t)
-	case Slice:
-		return newSliceEncoder(t)
-	case Array:
-		return newArrayEncoder(t)
-	case Ptr:
-		return newPtrEncoder(t)
-	default:
-		return unsupportedTypeEncoder
-	}
 }
 
 // getMarshalFields returns a list of fields that JSON should recognize for the given type.
