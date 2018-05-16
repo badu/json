@@ -9,8 +9,7 @@ package json
 import (
 	"bytes"
 	"encoding/base64"
-	"fmt"
-	"github.com/adrg/errors"
+	"errors"
 	"runtime"
 )
 
@@ -224,7 +223,7 @@ func process(d *decodeState, v Value) {
 func literalStore(d *decodeState, item []byte, v Value) {
 	if len(item) == 0 {
 		// Empty string given
-		saveError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+		saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 		return
 	}
 
@@ -247,7 +246,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, nullLiteral) {
-			saveError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
 		}
 		//	setting null.
@@ -262,7 +261,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		// The main parser checks that only true and false can reach here,
 		// but if this was a isBasic string input, it could be anything.
 		if !bytes.Equal(item, trueLiteral) && !bytes.Equal(item, falseLiteral) {
-			saveError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
 		}
 
@@ -282,12 +281,6 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		}
 
 	case quote: // string
-		s, ok := unquoteBytes(item)
-		if !ok {
-			decodeError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
-			return
-		}
-
 		switch v.Kind() {
 		default:
 			saveError(d, &UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
@@ -298,6 +291,11 @@ func literalStore(d *decodeState, item []byte, v Value) {
 				return
 			}
 			b := make([]byte, base64.StdEncoding.DecodedLen(len(item)))
+			s, ok := unquoteBytes(item)
+			if !ok {
+				decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
+				return
+			}
 			n, err := base64.StdEncoding.Decode(b, s)
 			if err != nil {
 				saveError(d, &UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
@@ -305,12 +303,20 @@ func literalStore(d *decodeState, item []byte, v Value) {
 			}
 			*(*[]byte)(v.Ptr) = b[:n]
 		case String:
-			stringValue := string(s)
-			*(*string)(v.Ptr) = stringValue
+			s, ok := unquote(item)
+			if !ok {
+				decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
+				return
+			}
+			*(*string)(v.Ptr) = s
 		case Interface:
 			if v.NumMethod() == 0 {
-				stringValue := string(s)
-				v.Set(ReflectOn(stringValue))
+				s, ok := unquote(item)
+				if !ok {
+					decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
+					return
+				}
+				v.Set(ReflectOn(s))
 			} else {
 				saveError(d, &UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
 				return
@@ -319,7 +325,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 
 	default: // number
 		if c != minus && (c < zero || c > nine) {
-			decodeError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type))
+			decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
 		}
 
@@ -460,6 +466,7 @@ func doArray(d *decodeState, v Value) {
 		return
 	}
 
+	var newSlice Value // for reusing
 	// fill it out
 	i := 0
 	for {
@@ -484,7 +491,7 @@ func doArray(d *decodeState, v Value) {
 
 				// short version for MakeSlice(typ,len,cap)
 				s := sliceHeader{unsafeNewArray(elemType, newCap), slcHeader.Len, newCap}
-				newSlice := Value{Type: v.Type, Ptr: ptr(&s), Flag: pointerFlag | Flag(Slice)}
+				newSlice = Value{Type: v.Type, Ptr: ptr(&s), Flag: pointerFlag | Flag(Slice)}
 
 				// short version of Copy(destSlice, srcSlice)
 				ds := *(*sliceHeader)(newSlice.Ptr)
@@ -733,7 +740,7 @@ func doStruct(d *decodeState, v Value) {
 						// See https://golang.org/issue/21357
 						derefType := (*ptrType)(ptr(corespValue.Type)).Type
 						if !corespValue.CanSet() {
-							saveError(d, fmt.Errorf("json: cannot set embedded pointer to unexported struct: %v", derefType))
+							saveError(d, errors.New("json: cannot set embedded pointer to unexported struct: "+derefType.String()))
 							// Invalidate corespValue to ensure d.value(corespValue) skips over the JSON value without assigning it to corespValue.
 							corespValue = Value{}
 							isBasic = false
@@ -750,7 +757,7 @@ func doStruct(d *decodeState, v Value) {
 			d.errorContext.Type = v.Type
 
 		} else if d.useStrict {
-			saveError(d, fmt.Errorf("json: unknown field %q", fieldName))
+			saveError(d, errors.New("json: unknown field "+string(fieldName)))
 		}
 
 		if isBasic {
@@ -758,7 +765,7 @@ func doStruct(d *decodeState, v Value) {
 			// If it finds anything other than a isBasic string literal or null, valueQuoted returns unquotedValue{}.
 			switch op := scanWhile(d, scanSkipSpace); op {
 			default:
-				saveError(d, fmt.Errorf("json: should never happen, because we're expecting begin literal, but received operation %d", op))
+				saveError(d, errors.New("json: should never happen, because we're expecting begin literal, but received operation "+string(FormatInt(int64(op)))))
 			case scanBeginLiteral:
 				switch va := literalInterface(d).(type) {
 				case nil:
@@ -771,7 +778,7 @@ func doStruct(d *decodeState, v Value) {
 				case string:
 					literalStore(d, []byte(va), corespValue)
 				default:
-					saveError(d, fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v", corespValue.Type))
+					saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into "+corespValue.Type.String()))
 				}
 			}
 		} else {
