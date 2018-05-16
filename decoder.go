@@ -37,11 +37,11 @@ func (d *Decoder) Decode(target interface{}) error {
 	if err != nil {
 		return err
 	}
-	d.state.init(d.buf[d.scanp : d.scanp+n])
+	initState(&d.state, d.buf[d.scanp:d.scanp+n])
 	d.scanp += n
 
 	// Don't save err from unmarshal into d.err: the connection is still usable since we read a complete JSON object from it before the error happened.
-	err = d.state.unmarshal(target)
+	err = unmarshal(&d.state, target)
 
 	// fixup token streaming state
 	d.tokenValueEnd()
@@ -56,7 +56,7 @@ func (d *Decoder) Buffered() io.Reader {
 
 // readValue reads a JSON value into dec.buf. It returns the length of the encoding.
 func (d *Decoder) readValue() (int, error) {
-	d.scan.reset()
+	scanReset(&d.scan)
 
 	scanp := d.scanp
 	var err error
@@ -65,7 +65,7 @@ Input:
 		// Look in the buffer for a new value.
 		for i, c := range d.buf[scanp:] {
 			d.scan.bytes++
-			cur := d.scan.step(c)
+			cur := d.scan.step(&d.scan, c)
 			if cur == scanEnd {
 				scanp += i
 				break Input
@@ -73,7 +73,7 @@ Input:
 			// scanEnd is delayed one byte.
 			// We might block trying to get that byte from src,
 			// so instead invent a space byte.
-			if (cur == scanEndObject || cur == scanEndArray) && d.scan.step(space) == scanEnd {
+			if (cur == scanEndObject || cur == scanEndArray) && d.scan.step(&d.scan, space) == scanEnd {
 				scanp += i + 1
 				break Input
 			}
@@ -88,7 +88,7 @@ Input:
 		// Delayed until now to allow buffer scan.
 		if err != nil {
 			if err == io.EOF {
-				if d.scan.step(space) == scanEnd {
+				if d.scan.step(&d.scan, space) == scanEnd {
 					break Input
 				}
 				if nonSpace(d.buf) {

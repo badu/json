@@ -798,7 +798,7 @@ func TestUnmarshal(t *testing.T) {
 	for i, tt := range unmarshalTests {
 		var scan scanner
 		in := []byte(tt.in)
-		if err := scan.checkValid(in); err != nil {
+		if err := checkValid(&scan, in); err != nil {
 			if !reflect.DeepEqual(err, tt.err) {
 				t.Errorf("#%d: %q\n%q", i, err.Error(), tt.err)
 				continue
@@ -2659,7 +2659,7 @@ func TestIndentErrors(t *testing.T) {
 func TestNextValueBig(t *testing.T) {
 	initBig(false)
 	var scan scanner
-	item, rest, err := scan.nextValue(jsonBig)
+	item, rest, err := nextValue(&scan, jsonBig)
 	if err != nil {
 		t.Fatalf("nextValue: %s", err)
 	}
@@ -2670,7 +2670,7 @@ func TestNextValueBig(t *testing.T) {
 		t.Errorf("invalid rest: %d", len(rest))
 	}
 
-	item, rest, err = scan.nextValue(append(jsonBig, "HELLO WORLD"...))
+	item, rest, err = nextValue(&scan, append(jsonBig, "HELLO WORLD"...))
 	if err != nil {
 		t.Fatalf("nextValue extra: %s", err)
 	}

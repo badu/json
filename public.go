@@ -61,14 +61,14 @@ func Unmarshal(data []byte, target interface{}) error {
 	// Check for well-formedness.
 	// Avoids filling out half a data structure before discovering a JSON syntax error.
 	var d decodeState
-	err := d.scan.checkValid(data)
+	err := checkValid(&d.scan, data)
 	if err != nil {
 		return err
 	}
 
-	d.init(data)
+	initState(&d, data)
 
-	return d.unmarshal(target)
+	return unmarshal(&d, target)
 }
 
 // Marshal returns the JSON encoding of v.
@@ -166,7 +166,7 @@ func Unmarshal(data []byte, target interface{}) error {
 //
 func Marshal(v interface{}) ([]byte, error) {
 	e := encodeState{opts: encOpts{escapeHTML: true}}
-	err := e.marshal(v)
+	err := marshal(&e, v)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func Marshal(v interface{}) ([]byte, error) {
 // Same as Marshal, but sets the flag to sort map keys while serializing
 func MarshalWithSortMap(v interface{}) ([]byte, error) {
 	e := encodeState{opts: encOpts{escapeHTML: true, willSortMapKeys: true}}
-	err := e.marshal(v)
+	err := marshal(&e, v)
 	if err != nil {
 		return nil, err
 	}
@@ -243,12 +243,12 @@ func Compact(dst *Buffer, src []byte) error {
 func Indent(dst *Buffer, src []byte, prefix, indent string) error {
 	origLen := dst.Len()
 	var scan scanner
-	scan.reset()
+	scanReset(&scan)
 	needIndent := false
 	depth := 0
 	for _, c := range src {
 		scan.bytes++
-		v := scan.step(c)
+		v := scan.step(&scan, c)
 		if v == scanSkipSpace {
 			continue
 		}
@@ -300,7 +300,7 @@ func Indent(dst *Buffer, src []byte, prefix, indent string) error {
 
 	dst.Bytes() // force write any peding byte
 
-	if scan.eof() == scanError {
+	if scanEof(&scan) == scanError {
 		dst.Truncate(origLen)
 		return scan.err
 	}
@@ -309,7 +309,7 @@ func Indent(dst *Buffer, src []byte, prefix, indent string) error {
 
 // Valid reports whether data is a valid JSON encoding.
 func Valid(data []byte) bool {
-	return (&scanner{}).checkValid(data) == nil
+	return checkValid(&scanner{}, data) == nil
 }
 
 // NewDecoder returns a new decoder that reads from r.

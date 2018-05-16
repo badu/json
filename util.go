@@ -345,7 +345,7 @@ func simpleLetterEqualFold(srcKey, destKey []byte) bool {
 func compact(dst *Buffer, src []byte, escape bool) error {
 	origLen := dst.Len()
 	var scan scanner
-	scan.reset()
+	scanReset(&scan)
 	start := 0
 	for i, c := range src {
 		if escape && (c == '<' || c == '>' || c == '&') {
@@ -366,7 +366,7 @@ func compact(dst *Buffer, src []byte, escape bool) error {
 			dst.WriteByte(hex[src[i+2]&0xF])
 			start = i + 3
 		}
-		v := scan.step(c)
+		v := scan.step(&scan, c)
 		if v >= scanSkipSpace {
 			if v == scanError {
 				break
@@ -377,7 +377,7 @@ func compact(dst *Buffer, src []byte, escape bool) error {
 			start = i + 1
 		}
 	}
-	if scan.eof() == scanError {
+	if scanEof(&scan) == scanError {
 		dst.Truncate(origLen)
 		return scan.err
 	}
@@ -418,49 +418,6 @@ func quoteChar(c byte) string {
 	// use isBasic string with different quotation marks
 
 	return "'" + string(c) + "'"
-}
-
-// indirect walks down v allocating pointers as needed, until it gets to a non-pointer.
-// if it encounters an Unmarshaler, indirect stops and returns that.
-// if decodingNull is true, indirect stops at the last pointer so it can be set to nil.
-func indirect(v Value, decodingNull bool) (Value, bool) {
-	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
-	if v.Kind() != Ptr && v.Type.Name() != "" && v.CanAddr() {
-		v = Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
-	}
-	for {
-		// Load value from interface, but only if the result will be
-		// usefully addressable.
-		if v.Kind() == Interface && !v.IsNil() {
-			e := v.Iface() // .Elem()
-			if e.Kind() == Ptr && !e.IsNil() && (!decodingNull || e.Deref().Kind() == Ptr) {
-				v = e
-				continue
-			}
-		}
-
-		if v.Kind() != Ptr {
-			break
-		}
-
-		// now v.Kind() == Ptr
-		if v.Deref().Kind() != Ptr && decodingNull && v.CanSet() {
-			break
-		}
-
-		if v.IsNil() {
-			v.Set(New((*ptrType)(ptr(v.Type)).Type))
-		}
-
-		if v.Type.NumMethod() > 0 {
-			if v.Type.implements(unmarshalerType) {
-				return v, true
-			}
-		}
-
-		v = v.Deref()
-	}
-	return v, false
 }
 
 func convertNumber(from []byte, useNumber bool) (interface{}, error) {

@@ -243,8 +243,8 @@ type (
 	// to recognize the end of numbers: is 123 a whole value or
 	// the beginning of 12345e+6?).
 	scanner struct {
-		step       func(byte) int // The step is a func to be called to execute the next transition.Also tried using an integer constant and a single func with a switch, but using the func directly was 10% faster on a 64-bit Mac Mini, and it's nicer to read.
-		redoState  func(byte) int
+		step       func(*scanner, byte) int // The step is a func to be called to execute the next transition.Also tried using an integer constant and a single func with a switch, but using the func directly was 10% faster on a 64-bit Mac Mini, and it's nicer to read.
+		redoState  func(*scanner, byte) int
 		parseState []int // Stack of what we're in the middle of - array values, object keys, object values.
 		redoCode   int
 		err        error // Error that happened, if any.

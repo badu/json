@@ -22,7 +22,7 @@ func (m marshalFields) Less(i, j int) bool {
 	return len(m[i].indexes) < len(m[j].indexes)
 }
 
-func (m marshalFields) dominantMarshalField() (MarshalField, bool) {
+func dominantMarshalField(m marshalFields) (MarshalField, bool) {
 	// The fields are sorted in increasing index-length order. The winner must therefore be one with the shortest index length. Drop all longer entries, which is easy: just truncate the slice.
 	length := len(m[0].indexes)
 	tagged := -1 // Index of first tagged field.
@@ -62,7 +62,7 @@ func (n Number) Int64() (int64, error) {
 	return IntParse([]byte(n))
 }
 
-func (w *KeyValuePair) resolve() error {
+func resolveKey(w *KeyValuePair) error {
 	switch w.value.Kind() {
 	case String:
 		w.keyName = []byte(*(*string)(w.value.Ptr))

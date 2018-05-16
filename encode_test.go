@@ -528,10 +528,10 @@ func TestStringBytes(t *testing.T) {
 	byteS := []byte(s)
 	for _, escapeHTML := range []bool{true, false} {
 		es := &encodeState{opts: encOpts{escapeHTML: escapeHTML}}
-		es.stringBytes(byteS)
+		writeBytes(es, byteS)
 
 		esBytes := &encodeState{opts: encOpts{escapeHTML: escapeHTML}}
-		esBytes.stringBytes(byteS)
+		writeBytes(esBytes, byteS)
 
 		enc := es.Buffer.String()
 		encBytes := esBytes.Buffer.String()

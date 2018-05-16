@@ -18,8 +18,8 @@ import (
 	"unicode/utf8"
 )
 
-// NOTE: keep in sync with stringBytes below.
-func (e *encodeState) string(name string) {
+// NOTE: keep in sync with below.
+func writeString(e *encodeState, name string) {
 	e.WriteByte(quote)
 	start := 0
 	for i := 0; i < len(name); {
@@ -85,7 +85,7 @@ func (e *encodeState) string(name string) {
 	e.WriteByte(quote)
 }
 
-func (e *encodeState) stringBytes(s []byte) {
+func writeBytes(e *encodeState, s []byte) {
 	e.WriteByte(quote)
 
 	start := 0
@@ -161,7 +161,7 @@ func (e *encodeState) stringBytes(s []byte) {
 	e.WriteByte(quote)
 }
 
-func (e *encodeState) marshal(v interface{}) (err error) {
+func marshal(e *encodeState, v interface{}) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
@@ -182,7 +182,7 @@ func (e *encodeState) marshal(v interface{}) (err error) {
 	return nil
 }
 
-func (e *encodeState) error(err error) {
+func encodeError(e *encodeState, err error) {
 	panic(err)
 }
 
@@ -192,7 +192,7 @@ func marshalerEncoder(e *encodeState, v Value) {
 		return
 	}
 	if !v.IsValid() {
-		e.error(errors.New("Invalid value while calling Marshal"))
+		encodeError(e, errors.New("Invalid value while calling Marshal"))
 		return
 	}
 	m, ok := v.valueInterface().(Marshaler)
@@ -207,7 +207,7 @@ func marshalerEncoder(e *encodeState, v Value) {
 		err = compact(&e.Buffer, b, e.opts.escapeHTML)
 	}
 	if err != nil {
-		e.error(&MarshalerError{v.Type, err})
+		encodeError(e, &MarshalerError{v.Type, err})
 	}
 }
 
@@ -218,7 +218,7 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 		return
 	}
 	if !va.IsValid() {
-		e.error(errors.New("Invalid value while calling [addr] Marshal"))
+		encodeError(e, errors.New("Invalid value while calling [addr] Marshal"))
 		return
 	}
 	m, ok := va.valueInterface().(Marshaler)
@@ -233,7 +233,7 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 		err = compact(&e.Buffer, b, true)
 	}
 	if err != nil {
-		e.error(&MarshalerError{v.Type, err})
+		encodeError(e, &MarshalerError{v.Type, err})
 	}
 }
 
@@ -272,7 +272,7 @@ func uintEncoder(e *encodeState, v Value) {
 func float32Encoder(e *encodeState, v Value) {
 	value := float64(*(*float32)(v.Ptr))
 	if math.IsInf(value, 0) || math.IsNaN(value) {
-		e.error(&UnsupportedValueError{FormatFloat(value, 32)})
+		encodeError(e, &UnsupportedValueError{FormatFloat(value, 32)})
 	}
 
 	// Convert as if by ES6 number to string conversion.
@@ -309,7 +309,7 @@ func float32Encoder(e *encodeState, v Value) {
 func float64Encoder(e *encodeState, v Value) {
 	value := *(*float64)(v.Ptr)
 	if math.IsInf(value, 0) || math.IsNaN(value) {
-		e.error(&UnsupportedValueError{FormatFloat(value, 64)})
+		encodeError(e, &UnsupportedValueError{FormatFloat(value, 64)})
 	}
 
 	// Convert as if by ES6 number to string conversion.
@@ -349,7 +349,7 @@ func stringEncoder(e *encodeState, v Value) {
 			theStr = "0" // Number's zero-val
 		}
 		if !IsValidNumber(theStr) {
-			e.error(errors.New("json: invalid number literal `" + theStr + "`"))
+			encodeError(e, errors.New("json: invalid number literal `"+theStr+"`"))
 		}
 		e.WriteString(theStr)
 		return
@@ -358,11 +358,11 @@ func stringEncoder(e *encodeState, v Value) {
 	if e.opts.quoted {
 		sb, err := Marshal(theStr)
 		if err != nil {
-			e.error(err)
+			encodeError(e, err)
 		}
-		e.stringBytes(sb)
+		writeBytes(e, sb)
 	} else {
-		e.string(theStr)
+		writeString(e, theStr)
 	}
 }
 
@@ -407,7 +407,7 @@ func invalidValueEncoder(e *encodeState, _ Value) {
 }
 
 func unsupportedTypeEncoder(e *encodeState, v Value) {
-	e.error(&UnsupportedTypeError{v.Type})
+	encodeError(e, &UnsupportedTypeError{v.Type})
 }
 
 func (ae *allEncoder) encodeCond(e *encodeState, v Value) {
@@ -534,7 +534,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 
 		for idx, key := range mapKeys {
 			result[idx].value = key
-			if err := result[idx].resolve(); err != nil {
+			if err := resolveKey(&result[idx]); err != nil {
 				//error(&MarshalerError{key.Type(), err})
 				panic("Error : " + err.Error() + " on " + key.Type.Name())
 			}
@@ -552,7 +552,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			if j > 0 {
 				e.WriteByte(comma)
 			}
-			e.stringBytes(key.keyName)
+			writeBytes(e, key.keyName)
 			e.WriteByte(colon)
 
 			var keyPtr ptr
@@ -611,7 +611,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		if i > 0 {
 			e.WriteByte(comma)
 		}
-		e.stringBytes(keyName)
+		writeBytes(e, keyName)
 		e.WriteByte(colon)
 
 		var keyPtr ptr
@@ -713,7 +713,7 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 							if !first {
 								e.WriteByte(comma)
 							}
-							e.stringBytes(curField.name)
+							writeBytes(e, curField.name)
 							e.WriteByte(colon)
 							e.opts.quoted = curField.isBasic
 							switch carrierField.Kind() {
@@ -752,7 +752,7 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 			e.WriteByte(comma)
 		}
 
-		e.stringBytes(curField.name)
+		writeBytes(e, curField.name)
 		e.WriteByte(colon)
 		e.opts.quoted = curField.isBasic
 
@@ -1069,7 +1069,7 @@ func getMarshalFields(t *RType) marshalFields {
 			out = append(out, fi)
 			continue
 		}
-		dominant, ok := result[i : i+advance].dominantMarshalField()
+		dominant, ok := dominantMarshalField(result[i : i+advance])
 		if ok {
 			out = append(out, dominant)
 		}
