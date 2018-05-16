@@ -7,6 +7,7 @@
 package json
 
 import (
+	"bytes"
 	"io"
 	"math/rand"
 	"testing"
@@ -488,39 +489,49 @@ func BenchmarkBufferFullSmallReads(b *testing.B) {
 func TestWriteBytes(t *testing.T) {
 	var a Buffer
 	a.WriteQuoted([]byte(`Nulla`))
-	t.Logf("Quoted : `%s`", string(a.Bytes()))
+	if !bytes.Equal(a.Bytes(), []byte(`"Nulla"`)) {
+		t.Fatal("Not equal")
+	}
 
 	a.Reset()
-	t.Logf("Reset Quoted : `%s`", string(a.Bytes()))
 	a.WriteByte(':')
 	a.WriteQuoted([]byte(`Nulla`))
-	t.Logf("Post reset Quoted : `%s`", string(a.Bytes()))
+	if !bytes.Equal(a.Bytes(), []byte(`:"Nulla"`)) {
+		t.Fatal("Not equal")
+	}
 
 	a.Reset()
-	t.Logf("Reset Quoted : `%s`", string(a.Bytes()))
 	a.WriteQuoted([]byte(`Nulla!`))
 	a.WriteQuoted([]byte(`42`))
-	t.Logf("Post reset Quoted #2: `%s`", string(a.Bytes()))
+	if !bytes.Equal(a.Bytes(), []byte(`"Nulla!""42"`)) {
+		t.Fatal("Not equal")
+	}
 
 	var b Buffer
 	b.Write([]byte(`Nulla`))
-	t.Logf("Before : `%s`", string(b.Bytes()))
 	b.WriteBytes(backSlash, 'u', '0', '0')
-	t.Logf("After : `%s`", string(b.Bytes()))
+	if !bytes.Equal(b.Bytes(), []byte(`Nulla\u00`)) {
+		t.Fatal("Not equal")
+	}
 
 	var c Buffer
 	c.WriteByte('a')
 	c.WriteByte('b')
-	t.Logf("Test : `%s`", string(c.Bytes()))
+	if !bytes.Equal(c.Bytes(), []byte(`ab`)) {
+		t.Fatal("Not equal")
+	}
 
 	var d Buffer
 	d.WriteByte(':')
 	d.WriteString("Bogdan")
-	t.Logf("Test : `%s`", string(d.Bytes()))
+	if !bytes.Equal(d.Bytes(), []byte(`:Bogdan`)) {
+		t.Fatal("Not equal")
+	}
 
 	var e Buffer
 	e.WriteByte(':')
 	e.WriteBytes(backSlash, 'u', '0', '0')
-	t.Logf("Test : `%s`", string(e.Bytes()))
-
+	if !bytes.Equal(e.Bytes(), []byte(`:\u00`)) {
+		t.Fatal("Not equal")
+	}
 }

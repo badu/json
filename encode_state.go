@@ -352,16 +352,17 @@ func stringEncoder(e *encodeState, v Value) {
 			e.error(errors.New("json: invalid number literal `" + theStr + "`"))
 		}
 		e.WriteString(theStr)
-	} else {
-		if e.opts.quoted {
-			sb, err := Marshal(theStr)
-			if err != nil {
-				e.error(err)
-			}
-			e.stringBytes(sb)
-		} else {
-			e.string(theStr)
+		return
+	}
+
+	if e.opts.quoted {
+		sb, err := Marshal(theStr)
+		if err != nil {
+			e.error(err)
 		}
+		e.stringBytes(sb)
+	} else {
+		e.string(theStr)
 	}
 }
 
@@ -427,10 +428,6 @@ func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 	if v.isPointer() {
 		ptrToV = *(*ptr)(ptrToV)
 	}
-	// The returned value's address is v's value.
-	if ptrToV == nil {
-		panic("Pointer nil. shouldn't happen! ever!")
-	}
 	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
 	typ := (*ptrType)(ptr(v.Type)).Type
 	v.Type = typ
@@ -439,17 +436,7 @@ func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 	ae.encs[0](e, v)
 }
 
-func (ae *allEncoder) encodeSlice(e *encodeState, v Value) {
-	if v.IsNil() {
-		e.Write(nullLiteral)
-		return
-	}
-	ae.encs[0](e, v)
-}
-
 func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
-	// Mark Array Start
-	e.WriteByte(squareOpen)
 	arrLen := 0
 	isSlice := false
 	var slcHeader *sliceHeader
@@ -462,12 +449,19 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 		arrLen = int(arrType.Len)
 		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(arrType.Kind())
 	case Slice:
+		if v.IsNil() {
+			e.Write(nullLiteral)
+			return
+		}
 		isSlice = true
 		arrElemType = (*sliceType)(ptr(v.Type)).ElemType
 		slcHeader = (*sliceHeader)(v.Ptr)
 		arrLen = slcHeader.Len
 		fl = addressableFlag | pointerFlag | v.ro() | Flag(arrElemType.Kind())
 	}
+	// Mark Array Start
+	e.WriteByte(squareOpen)
+
 	// doesn't seem to help much, but we're reusing it anyway
 	daVal := Value{Type: arrElemType, Flag: fl}
 	for i := 0; i < arrLen; i++ {
@@ -480,10 +474,169 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 		} else {
 			daVal.Ptr = add(v.Ptr, uintptr(i)*arrElemType.size)
 		}
+
 		ae.encs[0](e, daVal)
 	}
 	// Mark Array End
 	e.WriteByte(squareClose)
+}
+
+func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
+	if v.IsNil() {
+		// Write "null"
+		e.Write(nullLiteral)
+		return
+	}
+
+	mapElemType := (*mapType)(ptr(v.Type)).ElemType
+	// prepare easy access
+	fl := v.ro() | Flag(mapElemType.Kind())
+	vPointer := v.pointer()
+
+	// prepare map keys
+	typedMap := (*mapType)(ptr(v.Type))
+	keyType := typedMap.KeyType
+
+	mapkeyfl := v.ro() | Flag(keyType.Kind())
+
+	mapPtr := v.pointer()
+	mapLen := int(0)
+	if mapPtr != nil {
+		mapLen = maplen(mapPtr)
+	}
+
+	it := mapiterinit(v.Type, mapPtr)
+	mapKeys := make([]Value, mapLen)
+	for i := 0; i < len(mapKeys); i++ {
+		key := mapiterkey(it)
+		if key == nil {
+			// Someone deleted an entry from the map since we called maplen above. It's a data race, but nothing we can do about it.
+			break
+		}
+		if keyType.isDirectIface() {
+			// Copy result so future changes to the map won't change the underlying value.
+			keyValue := unsafeNew(keyType)
+			typedmemmove(keyType, keyValue, key)
+			mapKeys[i] = Value{keyType, keyValue, mapkeyfl | pointerFlag}
+		} else {
+			mapKeys[i] = Value{keyType, *(*ptr)(key), mapkeyfl}
+		}
+		mapiternext(it)
+	}
+
+	// new feature : optional sorting for map keys (default false)
+	if e.opts.willSortMapKeys {
+		// Mark Map Start
+		e.WriteByte(curlOpen)
+
+		// TODO : maybe use preparation above in the same operation (instead of iterating twice)
+		result := make([]KeyValuePair, len(mapKeys))
+
+		for idx, key := range mapKeys {
+			result[idx].value = key
+			if err := result[idx].resolve(); err != nil {
+				//error(&MarshalerError{key.Type(), err})
+				panic("Error : " + err.Error() + " on " + key.Type.Name())
+			}
+		}
+		sort.Slice(result, func(i, j int) bool {
+			//The result will be -1 if result[i].keyName < result[j].keyName, and +1 if result[i].keyName > result[j].keyName.
+			if bytes.Compare(result[i].keyName, result[j].keyName) == -1 {
+				return true
+			}
+			return false
+		})
+		// doesn't seem to help much, but we're reusing it anyway
+		daVal := Value{Type: mapElemType}
+		for j, key := range result {
+			if j > 0 {
+				e.WriteByte(comma)
+			}
+			e.stringBytes(key.keyName)
+			e.WriteByte(colon)
+
+			var keyPtr ptr
+			if key.value.isPointer() {
+				keyPtr = key.value.Ptr
+			} else {
+				keyPtr = ptr(&key.value.Ptr)
+			}
+			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
+			if mapElemType.isDirectIface() {
+				// Copy result so future changes to the map won't change the underlying value.
+				mapElemValue := unsafeNew(mapElemType)
+				typedmemmove(mapElemType, mapElemValue, elemPtr)
+				daVal.Ptr = mapElemValue
+				daVal.Flag = fl | pointerFlag | key.value.ro()
+			} else {
+				daVal.Ptr = *(*ptr)(elemPtr)
+				daVal.Flag = fl | key.value.ro()
+			}
+
+			ae.encs[0](e, daVal)
+		}
+
+		// Mark Map End
+		e.WriteByte(curlClose)
+		return
+	}
+
+	// Mark Map Start
+	e.WriteByte(curlOpen)
+	// checking and setting key kind
+	keyKind := Invalid
+	for _, key := range mapKeys {
+		keyKind = key.Kind()
+		switch keyKind {
+		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, String:
+		default:
+			panic("Bad key kind!")
+		}
+		break
+	}
+	// doesn't seem to help much, but we're reusing it anyway
+	daVal := Value{Type: mapElemType}
+	// default, unsorted map keys
+	for i, key := range mapKeys {
+		var keyName []byte
+
+		switch keyKind {
+		case Int, Int8, Int16, Int32, Int64:
+			keyName = FormatInt(key.Int())
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			keyName = FormatUint(key.Uint())
+		case String:
+			keyName = []byte(*(*string)(key.Ptr))
+		}
+		if i > 0 {
+			e.WriteByte(comma)
+		}
+		e.stringBytes(keyName)
+		e.WriteByte(colon)
+
+		var keyPtr ptr
+		if key.isPointer() {
+			keyPtr = key.Ptr
+		} else {
+			keyPtr = ptr(&key.Ptr)
+		}
+		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
+		if mapElemType.isDirectIface() {
+			// Copy result so future changes to the map won't change the underlying value.
+			mapElemValue := unsafeNew(mapElemType)
+			typedmemmove(mapElemType, mapElemValue, elemPtr)
+			daVal.Ptr = mapElemValue
+			daVal.Flag = fl | pointerFlag | key.ro()
+		} else {
+			daVal.Ptr = *(*ptr)(elemPtr)
+			daVal.Flag = fl | key.ro()
+		}
+
+		ae.encs[0](e, daVal)
+	}
+
+	// Mark Map End
+	e.WriteByte(curlClose)
 }
 
 func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
@@ -602,202 +755,12 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 		e.stringBytes(curField.name)
 		e.WriteByte(colon)
 		e.opts.quoted = curField.isBasic
-		ae.encs[i](e, fieldValue)
 
+		ae.encs[i](e, fieldValue)
 	}
 
 	//Mark Struct End
 	e.WriteByte(curlClose)
-}
-
-func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
-	if v.IsNil() {
-		// Write "null"
-		e.Write(nullLiteral)
-		return
-	}
-
-	mapElemType := (*mapType)(ptr(v.Type)).ElemType
-	// prepare easy access
-	fl := v.ro() | Flag(mapElemType.Kind())
-	vPointer := v.pointer()
-
-	// prepare map keys
-	typedMap := (*mapType)(ptr(v.Type))
-	keyType := typedMap.KeyType
-
-	mapkeyfl := v.ro() | Flag(keyType.Kind())
-
-	mapPtr := v.pointer()
-	mapLen := int(0)
-	if mapPtr != nil {
-		mapLen = maplen(mapPtr)
-	}
-
-	it := mapiterinit(v.Type, mapPtr)
-	mapKeys := make([]Value, mapLen)
-	for i := 0; i < len(mapKeys); i++ {
-		key := mapiterkey(it)
-		if key == nil {
-			// Someone deleted an entry from the map since we called maplen above. It's a data race, but nothing we can do about it.
-			break
-		}
-		if keyType.isDirectIface() {
-			// Copy result so future changes to the map won't change the underlying value.
-			keyValue := unsafeNew(keyType)
-			typedmemmove(keyType, keyValue, key)
-			mapKeys[i] = Value{keyType, keyValue, mapkeyfl | pointerFlag}
-		} else {
-			mapKeys[i] = Value{keyType, *(*ptr)(key), mapkeyfl}
-		}
-		mapiternext(it)
-	}
-
-	// new feature : optional sorting for map keys (default false)
-	if e.opts.willSortMapKeys {
-		// Mark Map Start
-		e.WriteByte(curlOpen)
-
-		// TODO : maybe use preparation above in the same operation (instead of iterating twice)
-		result := make([]KeyValuePair, len(mapKeys))
-
-		for idx, key := range mapKeys {
-			result[idx].value = key
-			if err := result[idx].resolve(); err != nil {
-				//error(&MarshalerError{key.Type(), err})
-				panic("Error : " + err.Error() + " on " + key.Type.Name())
-			}
-		}
-		sort.Slice(result, func(i, j int) bool {
-			//The result will be -1 if result[i].keyName < result[j].keyName, and +1 if result[i].keyName > result[j].keyName.
-			if bytes.Compare(result[i].keyName, result[j].keyName) == -1 {
-				return true
-			}
-			return false
-		})
-		// doesn't seem to help much, but we're reusing it anyway
-		daVal := Value{Type: mapElemType}
-		for j, key := range result {
-			if j > 0 {
-				e.WriteByte(comma)
-			}
-			e.stringBytes(key.keyName)
-			e.WriteByte(colon)
-
-			var keyPtr ptr
-			if key.value.isPointer() {
-				keyPtr = key.value.Ptr
-			} else {
-				keyPtr = ptr(&key.value.Ptr)
-			}
-			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
-			if elemPtr != nil {
-				if mapElemType.isDirectIface() {
-					// Copy result so future changes to the map won't change the underlying value.
-					mapElemValue := unsafeNew(mapElemType)
-					typedmemmove(mapElemType, mapElemValue, elemPtr)
-					daVal.Ptr = mapElemValue
-					daVal.Flag = fl | pointerFlag | key.value.ro()
-				} else {
-					daVal.Ptr = *(*ptr)(elemPtr)
-					daVal.Flag = fl | key.value.ro()
-				}
-				ae.encs[0](e, daVal)
-			} else {
-				panic("elemPtr == nil")
-			}
-
-		}
-
-		// Mark Map End
-		e.WriteByte(curlClose)
-		return
-	}
-
-	// Mark Map Start
-	e.WriteByte(curlOpen)
-	// checking and setting key kind
-	keyKind := Invalid
-	for _, key := range mapKeys {
-		keyKind = key.Kind()
-		switch keyKind {
-		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, String:
-		default:
-			panic("Bad key kind!")
-		}
-		break
-	}
-	// doesn't seem to help much, but we're reusing it anyway
-	daVal := Value{Type: mapElemType}
-	// default, unsorted map keys
-	for i, key := range mapKeys {
-		var keyName []byte
-
-		switch keyKind {
-		case Int, Int8, Int16, Int32, Int64:
-			keyName = FormatInt(key.Int())
-		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			keyName = FormatUint(key.Uint())
-		case String:
-			keyName = []byte(*(*string)(key.Ptr))
-		}
-		if i > 0 {
-			e.WriteByte(comma)
-		}
-		e.stringBytes(keyName)
-		e.WriteByte(colon)
-
-		var keyPtr ptr
-		if key.isPointer() {
-			keyPtr = key.Ptr
-		} else {
-			keyPtr = ptr(&key.Ptr)
-		}
-		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
-		if elemPtr != nil {
-			if mapElemType.isDirectIface() {
-				// Copy result so future changes to the map won't change the underlying value.
-				mapElemValue := unsafeNew(mapElemType)
-				typedmemmove(mapElemType, mapElemValue, elemPtr)
-				daVal.Ptr = mapElemValue
-				daVal.Flag = fl | pointerFlag | key.ro()
-			} else {
-				daVal.Ptr = *(*ptr)(elemPtr)
-				daVal.Flag = fl | key.ro()
-			}
-			ae.encs[0](e, daVal)
-		} else {
-			panic("elemPtr == nil")
-		}
-	}
-
-	// Mark Map End
-	e.WriteByte(curlClose)
-}
-
-func getCachedFields(typ *RType) marshalFields {
-	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
-	fieldsInfo := cachedFields[typ]
-	if fieldsInfo == nil {
-		// Compute fields without lock.
-		// Might duplicate effort but won't hold other computations back.
-		fieldsInfo = getMarshalFields(typ)
-		if fieldsInfo != nil {
-			fieldsCache.mu.Lock()
-			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
-
-			newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
-
-			for typeKey, fieldsValues := range cachedFields {
-				newFieldsMap[typeKey] = fieldsValues
-			}
-
-			newFieldsMap[typ] = fieldsInfo
-			fieldsCache.value.Store(newFieldsMap)
-			fieldsCache.mu.Unlock()
-		}
-	}
-	return fieldsInfo
 }
 
 // newTypeEncoder constructs an encoderFunc for a type.
@@ -828,8 +791,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 	case Interface:
 		return interfaceEncoder
 	case Struct:
-		enc := newStructEncoder(t)
-		return enc.encodeStruct
+		return newStructEncoder(t).encodeStruct
 	case Map:
 		mapInfo := (*mapType)(ptr(t))
 		switch mapInfo.KeyType.Kind() {
@@ -852,10 +814,23 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 				return encodeByteSlice
 			}
 		}
-		return newSliceEncoder(t).encodeSlice
+		return newArrayEncoder(t).encodeArray
 	case Array:
 		return newArrayEncoder(t).encodeArray
 	case Ptr:
+		// deref all pointers
+		/**
+				derefType := t
+
+				derefed := 0
+				for derefType.Kind() == Ptr {
+					derefType = (*ptrType)(ptr(derefType)).Type
+					derefed++
+				}
+				if derefed != 1 {
+					println("Deref " + StringKind(derefType.Kind()) + " " + string(FormatInt(int64(derefed))))
+				}
+		**/
 		return newPtrEncoder(t).encodePtr
 	default:
 		return unsupportedTypeEncoder
@@ -873,7 +848,6 @@ func newPtrEncoder(t *RType) *allEncoder {
 func newStructEncoder(t *RType) *allEncoder {
 	fieldsInfo := getCachedFields(t)
 	se := allEncoder{
-		//fields: fieldsInfo,
 		encs: make([]encoderFunc, len(fieldsInfo)),
 	}
 
@@ -890,11 +864,6 @@ func newStructEncoder(t *RType) *allEncoder {
 		se.encs[i] = typeEncoder(et)
 	}
 	return &se
-}
-
-func newSliceEncoder(t *RType) *allEncoder {
-	aenc := newArrayEncoder(t).encodeArray
-	return &allEncoder{encs: encFns{aenc}}
 }
 
 func newArrayEncoder(t *RType) *allEncoder {
@@ -967,14 +936,11 @@ func getMarshalFields(t *RType) marshalFields {
 				continue
 			}
 			visited[curField.Type] = true
-
 			// Scan curField.Type for fields to include.
 			curStruct := (*structType)(ptr(curField.Type))
 			for index := range curStruct.fields {
 				field := &curStruct.fields[index]
 				fieldType := field.Type
-				fieldName := field.name.name()
-				fieldTag := field.name.tag()
 
 				embedded := field.offsetEmbed&1 != 0
 				isNotExported := false
@@ -997,7 +963,7 @@ func getMarshalFields(t *RType) marshalFields {
 				}
 
 				// start processing tags
-				tag := tagLookup(fieldTag, jsonTagName)
+				tag := tagLookup(field.name.tag(), jsonTagName)
 				// ignored
 				if idx := bytes.IndexByte(tag, minus); idx != -1 {
 					continue
@@ -1007,7 +973,7 @@ func getMarshalFields(t *RType) marshalFields {
 				jsonName, opts := parseTag(tag)
 				if !isValidTag(jsonName) {
 					tagged = false
-					jsonName = fieldName
+					jsonName = field.name.name()
 				}
 
 				indexes := make([]int, len(curField.indexes)+1)
@@ -1016,7 +982,7 @@ func getMarshalFields(t *RType) marshalFields {
 
 				fieldType = field.Type
 
-				if len(fieldType.Name()) == 0 && fieldType.Kind() == Ptr {
+				if !fieldType.hasName() && fieldType.Kind() == Ptr {
 					// Follow pointer.
 					fieldType = (*ptrType)(ptr(fieldType)).Type
 				}
@@ -1034,7 +1000,6 @@ func getMarshalFields(t *RType) marshalFields {
 						}
 					}
 					willBeOmitted := tagContains(opts, omitTagOption)
-
 					f := MarshalField{
 						name:      jsonName,
 						tag:       tagged,
@@ -1114,4 +1079,29 @@ func getMarshalFields(t *RType) marshalFields {
 	sort.Sort(marshalFields(result))
 
 	return result
+}
+
+func getCachedFields(typ *RType) marshalFields {
+	cachedFields, _ := fieldsCache.value.Load().(map[*RType]marshalFields)
+	fieldsInfo := cachedFields[typ]
+	if fieldsInfo == nil {
+		// Compute fields without lock.
+		// Might duplicate effort but won't hold other computations back.
+		fieldsInfo = getMarshalFields(typ)
+		if fieldsInfo != nil {
+			fieldsCache.mu.Lock()
+			cachedFields, _ = fieldsCache.value.Load().(map[*RType]marshalFields)
+
+			newFieldsMap := make(map[*RType]marshalFields, len(cachedFields)+1)
+
+			for typeKey, fieldsValues := range cachedFields {
+				newFieldsMap[typeKey] = fieldsValues
+			}
+
+			newFieldsMap[typ] = fieldsInfo
+			fieldsCache.value.Store(newFieldsMap)
+			fieldsCache.mu.Unlock()
+		}
+	}
+	return fieldsInfo
 }

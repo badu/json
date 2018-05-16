@@ -295,12 +295,11 @@ func (d *decodeState) literalStore(item []byte, v Value) {
 			d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
 			return
 		case Slice:
-			stringValue := string(s)
 			if (*sliceType)(ptr(v.Type)).ElemType.Kind() != Uint8 {
 				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
 				return
 			}
-			b := make([]byte, base64.StdEncoding.DecodedLen(len(stringValue)))
+			b := make([]byte, base64.StdEncoding.DecodedLen(len(item)))
 			n, err := base64.StdEncoding.Decode(b, s)
 			if err != nil {
 				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
@@ -308,10 +307,12 @@ func (d *decodeState) literalStore(item []byte, v Value) {
 			}
 			*(*[]byte)(v.Ptr) = b[:n]
 		case String:
-			*(*string)(v.Ptr) = string(s)
+			stringValue := string(s)
+			*(*string)(v.Ptr) = stringValue
 		case Interface:
 			if v.NumMethod() == 0 {
 				stringValue := string(s)
+				println(StringKind(ReflectOn(stringValue).Kind()))
 				v.Set(ReflectOn(stringValue))
 			} else {
 				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})

@@ -415,7 +415,7 @@ func _BenchmarkNewUnmarshalSmall(b *testing.B) {
 	}
 }
 
-func BenchmarkOldMarshalLarge(b *testing.B) {
+func _BenchmarkOldMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -425,7 +425,7 @@ func BenchmarkOldMarshalLarge(b *testing.B) {
 	}
 }
 
-func BenchmarkNewMarshalLarge(b *testing.B) {
+func _BenchmarkNewMarshalLarge(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -435,7 +435,7 @@ func BenchmarkNewMarshalLarge(b *testing.B) {
 	}
 }
 
-func BenchmarkOldMarshalMedium(b *testing.B) {
+func _BenchmarkOldMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -445,7 +445,7 @@ func BenchmarkOldMarshalMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkNewMarshalMedium(b *testing.B) {
+func _BenchmarkNewMarshalMedium(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -455,7 +455,7 @@ func BenchmarkNewMarshalMedium(b *testing.B) {
 	}
 }
 
-func BenchmarkOldMarshalSmall(b *testing.B) {
+func _BenchmarkOldMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -465,12 +465,50 @@ func BenchmarkOldMarshalSmall(b *testing.B) {
 	}
 }
 
-func BenchmarkNewMarshalSmall(b *testing.B) {
+func _BenchmarkNewMarshalSmall(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(NewSmallPayload()); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkOldMarshalAll(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := json.Marshal(allValue); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkNewMarshalAll(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Marshal(allValue); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkOldUnmarshalAll(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result := &All{}
+		json.Unmarshal([]byte(allValueIndent), result)
+	}
+}
+
+func BenchmarkNewUnmarshalAll(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result := &All{}
+		Unmarshal([]byte(allValueIndent), result)
 	}
 }
