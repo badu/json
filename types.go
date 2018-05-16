@@ -187,8 +187,8 @@ type (
 	}
 
 	errorContext struct {
-		Struct string
-		Field  string
+		Type  *RType
+		Field []byte
 	}
 
 	// decodeState represents the state while decoding a JSON value
@@ -332,6 +332,7 @@ type (
 )
 
 var (
+	emptyByte = make([]byte, 0, 0)
 	// you won't believe how good this encoder cache is
 	encoderCache sync.Map // map[*RType]encoderFunc
 	fieldsCache  struct {

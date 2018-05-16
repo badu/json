@@ -28,11 +28,11 @@ func saveError(d *decodeState, err error) {
 
 // addErrorContext returns a new error enhanced with information from d.errorContext
 func addErrorContext(d *decodeState, err error) error {
-	if len(d.errorContext.Struct) > 0 || len(d.errorContext.Field) > 0 {
+	if len(d.errorContext.Field) > 0 {
 		switch err := err.(type) {
 		case *UnmarshalTypeError:
-			err.Struct = d.errorContext.Struct
-			err.Field = d.errorContext.Field
+			err.Struct = d.errorContext.Type.Name()
+			err.Field = string(d.errorContext.Field)
 			return err
 		}
 	}
@@ -43,8 +43,6 @@ func initState(d *decodeState, data []byte) *decodeState {
 	d.data = data
 	d.offset = 0
 	d.savedError = nil
-	d.errorContext.Struct = ""
-	d.errorContext.Field = ""
 	return d
 }
 
@@ -748,8 +746,8 @@ func doStruct(d *decodeState, v Value) {
 
 				corespValue = corespValue.getField(idx)
 			}
-			d.errorContext.Field = string(curField.name)
-			d.errorContext.Struct = v.Type.Name()
+			d.errorContext.Field = curField.name
+			d.errorContext.Type = v.Type
 
 		} else if d.useStrict {
 			saveError(d, fmt.Errorf("json: unknown field %q", fieldName))
@@ -789,8 +787,7 @@ func doStruct(d *decodeState, v Value) {
 			decodeError(d, errPhase)
 		}
 
-		d.errorContext.Struct = ""
-		d.errorContext.Field = ""
+		d.errorContext.Field = emptyByte
 	}
 }
 
@@ -931,7 +928,7 @@ func literalInterface(d *decodeState) interface{} {
 // if decodingNull is true, indirect stops at the last pointer so it can be set to nil.
 func indirect(v Value, decodingNull bool) (Value, bool) {
 	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
-	if v.Kind() != Ptr && v.Type.Name() != "" && v.CanAddr() {
+	if v.Kind() != Ptr && v.Type.hasName() && v.CanAddr() {
 		v = Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
 	}
 	for {
