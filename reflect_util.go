@@ -274,6 +274,230 @@ func makeRunes(f Flag, run []rune, t *RType) Value {
 	return ret
 }
 
+// convert operation: direct copy
+func cvtDirect(v Value, typ *RType) Value {
+	f := v.Flag
+	ptr := v.Ptr
+	if v.CanAddr() {
+		// indirect, mutable word - make a copy
+		c := unsafeNew(typ)
+		typedmemmove(typ, c, ptr)
+		ptr = c
+		f &^= addressableFlag
+	}
+	return Value{Type: typ, Ptr: ptr, Flag: v.ro() | f}
+}
+
+func assertE2I(v Value, dst *RType, target ptr) {
+	// TODO : @badu - Type links to methods
+	//to be read "if NumMethod(dst) == 0{"
+	if (dst.Kind() == Interface && dst.NoOfIfaceMethods() == 0) || (dst.Kind() != Interface && lenExportedMethods(dst) == 0) {
+		// the case of "interface{}"
+		*(*interface{})(target) = v.valueInterface()
+	} else {
+		ifaceE2I(dst, v.valueInterface(), target)
+	}
+}
+
+// convert operation: concrete -> interface
+func cvtT2I(v Value, typ *RType) Value {
+	target := unsafeNew(typ)
+	assertE2I(v, typ, target)
+	return Value{Type: typ, Ptr: target, Flag: v.ro() | pointerFlag | Flag(Interface)}
+}
+
+// convert operation: interface -> interface
+func cvtI2I(v Value, typ *RType) Value {
+	if v.IsNil() {
+		ret := Zero(typ)
+		ret.Flag |= v.ro()
+		return ret
+	}
+	switch v.Kind() {
+	case Ptr:
+		return cvtT2I(valueDeref(v), typ)
+	case Interface:
+		return cvtT2I(valueIface(v), typ)
+	default:
+		return cvtT2I(v, typ)
+	}
+}
+
+func valueConvert(v Value, typ *RType) Value {
+	if v.hasMethodFlag() {
+		panic("Value.Convert : This is a method.")
+		//v = v.makeMethodValue()
+	}
+	destKind := typ.Kind()
+	srcKind := v.Type.Kind()
+
+	switch srcKind {
+	case Int, Int8, Int16, Int32, Int64:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return makeInt(v.ro(), uint64(v.Int()), typ) // convert operation: intXX -> [u]intXX
+		case Float32, Float64:
+			return makeFloat(v.ro(), float64(v.Int()), typ) // convert operation: intXX -> floatXX
+		case String:
+			return makeString(v.ro(), string(v.Int()), typ) // convert operation: intXX -> string
+		}
+	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return makeInt(v.ro(), v.Uint(), typ) // convert operation: uintXX -> [u]intXX
+		case Float32, Float64:
+			return makeFloat(v.ro(), float64(v.Uint()), typ) // convert operation: uintXX -> floatXX
+		case String:
+			return makeString(v.ro(), string(v.Uint()), typ) // convert operation: uintXX -> string
+		}
+	case Float32, Float64:
+		switch destKind {
+		case Int, Int8, Int16, Int32, Int64:
+			return makeInt(v.ro(), uint64(int64(v.Float())), typ) // convert operation: floatXX -> intXX
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			return makeInt(v.ro(), uint64(v.Float()), typ) // convert operation: floatXX -> uintXX
+		case Float32, Float64:
+			return makeFloat(v.ro(), v.Float(), typ) // convert operation: floatXX -> floatXX
+		}
+	case Complex64, Complex128:
+		switch destKind {
+		case Complex64, Complex128:
+			return makeComplex(v.ro(), v.Complex(), typ) // convert operation: complexXX -> complexXX
+		}
+	case String:
+		sliceElem := (*sliceType)(ptr(typ)).ElemType
+		if destKind == Slice && sliceElem.pkgPathLen() == 0 {
+			switch sliceElem.Kind() {
+			case Uint8:
+				return makeBytes(v.ro(), []byte(*(*string)(v.Ptr)), typ) // convert operation: string -> []byte
+			case Int32:
+				return makeRunes(v.ro(), []rune(*(*string)(v.Ptr)), typ) // convert operation: string -> []rune
+			}
+		}
+	case Slice:
+		sliceElem := (*sliceType)(ptr(v.Type)).ElemType
+		if destKind == String && sliceElem.pkgPathLen() == 0 {
+			switch sliceElem.Kind() {
+			case Uint8:
+				return makeString(v.ro(), string(*(*[]byte)(v.Ptr)), typ) // convert operation: []byte -> string
+			case Int32:
+				return makeString(v.ro(), string(*(*[]rune)(v.Ptr)), typ) // // convert operation: []rune -> string
+			}
+		}
+	}
+
+	// dst and src have same underlying type.
+	if v.Type.haveIdenticalUnderlyingType(typ, false) {
+		return cvtDirect(v, typ)
+	}
+	derefType := (*ptrType)(ptr(v.Type)).Type
+	destDerefType := (*ptrType)(ptr(typ)).Type
+	// dst and src are unnamed pointer types with same underlying base type.
+	if destKind == Ptr && !typ.hasName() &&
+		srcKind == Ptr && !v.Type.hasName() &&
+		derefType.haveIdenticalUnderlyingType(destDerefType, false) {
+		return cvtDirect(v, typ)
+	}
+
+	if v.Type.implements(typ) {
+		if srcKind == Interface {
+			return cvtI2I(v, typ)
+		}
+		return cvtT2I(v, typ)
+	}
+
+	panic("reflect.Value.Convert: value of type ") // + TypeToString(v.Type) + " cannot be converted to type " + TypeToString(t))
+}
+
+func valueIface(v Value) Value {
+	switch v.Kind() {
+	case Interface:
+		var eface interface{}
+		if v.Type.NoOfIfaceMethods() == 0 {
+			// the case of "interface{}"
+			eface = *(*interface{})(v.Ptr)
+		} else {
+			eface = *(*interface{ M() })(v.Ptr)
+		}
+		// unpackEface converts the empty interface 'eface' to a Value.
+		e := (*ifaceRtype)(ptr(&eface))
+		// NOTE: don't read e.word until we know whether it is really a pointer or not.
+		if e.Type == nil {
+			panic("Invalid IFACE")
+			// it's invalid
+			return Value{}
+		}
+		f := Flag(e.Type.Kind())
+		if e.Type.isDirectIface() {
+			f |= pointerFlag
+		}
+		x := Value{Type: e.Type, Ptr: e.word, Flag: f}
+		if x.IsValid() {
+			x.Flag |= v.ro()
+		}
+		return x
+	default:
+		panic("Not IFACE.")
+		return v
+	}
+}
+
+func valueDeref(v Value) Value {
+	ptrToV := v.Ptr
+	if v.isPointer() {
+		ptrToV = *(*ptr)(ptrToV)
+	}
+	// The returned value's address is v's value.
+	if ptrToV == nil {
+		return Value{}
+	}
+	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
+	typ := (*ptrType)(ptr(v.Type)).Type
+	fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
+	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
+}
+
+func valueAssignTo(v *Value, dst *RType, target ptr) {
+	if v.hasMethodFlag() {
+		//v = v.makeMethodValue()
+		panic("Value.assignTo : This is a method.")
+	}
+
+	switch {
+	default:
+		// TODO : shouldn't we fail first?
+		// Failed.
+		panic("reflect.Value.assignTo: value of type ") // + TypeToString(v.Type) + " is not assignable to type " + TypeToString(dst))
+
+	case v.Type.directlyAssignable(dst):
+		// Overwrite type so that they match. Same memory layout, so no harm done.
+		fl := v.Flag&(addressableFlag|pointerFlag) | v.ro()
+		fl |= Flag(dst.Kind())
+		v.Type = dst
+		v.Flag = fl
+		//return Value{Type: dst, Ptr: v.Ptr, Flag: fl}
+
+	case v.Type.implements(dst):
+		if target == nil {
+			target = unsafeNew(dst)
+		}
+		if v.Kind() == Interface && v.IsNil() {
+			// A nil ReadWriter passed to nil Reader is OK, but using ifaceE2I below will panic.
+			// Avoid the panic by returning a nil dst (e.g., Reader) explicitly.
+			v.Type = dst
+			v.Ptr = nil
+			v.Flag = Flag(Interface)
+			return
+			//return Value{Type: dst, Ptr: nil, Flag: Flag(Interface)}
+		}
+		assertE2I(*v, dst, target)
+		v.Type = dst
+		v.Ptr = target
+		v.Flag = pointerFlag | Flag(Interface)
+		//return Value{Type: dst, Ptr: target, Flag: pointerFlag | Flag(Interface)}
+	}
+}
+
 // ==============
 // Others (unused)
 // ==============

@@ -288,8 +288,8 @@ func float32Encoder(e *encodeState, v Value) {
 		}
 
 	}
-	var b []byte
-	b = AppendFloat(b, value, fmt, 32)
+
+	b := makeFloatBytes(value, fmt, 32)
 	if fmt == eChr {
 		// clean up e-09 to e-9
 		n := len(b)
@@ -323,8 +323,8 @@ func float64Encoder(e *encodeState, v Value) {
 			fmt = eChr
 		}
 	}
-	var b []byte
-	b = AppendFloat(b, value, fmt, 64)
+
+	b := makeFloatBytes(value, fmt, 64)
 	if fmt == eChr {
 		// clean up e-09 to e-9
 		n := len(b)
@@ -394,7 +394,7 @@ func interfaceEncoder(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-	value := v.Iface()
+	value := valueIface(v)
 	if !value.IsValid() {
 		invalidValueEncoder(e, value)
 		return
@@ -423,17 +423,7 @@ func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-	// short version of Deref, for reusing value
-	ptrToV := v.Ptr
-	if v.isPointer() {
-		ptrToV = *(*ptr)(ptrToV)
-	}
-	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
-	typ := (*ptrType)(ptr(v.Type)).Type
-	v.Type = typ
-	v.Ptr = ptrToV
-	v.Flag = v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
-	ae.encs[0](e, v)
+	ae.encs[0](e, valueDeref(v))
 }
 
 func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
@@ -655,7 +645,7 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 				if fieldValue.IsNil() {
 					continue
 				}
-				fieldValue = fieldValue.Deref()
+				fieldValue = valueDeref(fieldValue)
 			}
 			fieldValue = fieldValue.getField(idx)
 		}

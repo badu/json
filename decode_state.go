@@ -312,7 +312,6 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		case Interface:
 			if v.NumMethod() == 0 {
 				stringValue := string(s)
-				println(StringKind(ReflectOn(stringValue).Kind()))
 				v.Set(ReflectOn(stringValue))
 			} else {
 				saveError(d, &UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
@@ -441,15 +440,18 @@ func doArray(d *decodeState, v Value) {
 	}
 
 	var slcHeader *sliceHeader
+	var arrType *arrayType
 	var elemType *RType
 	theLen := 0
+	isSlice := false
 	// Check type of target.
 	switch v.Kind() {
 	case Array: // valid
-		arr := (*arrayType)(ptr(v.Type))
-		theLen = int(arr.Len)
-		elemType = arr.ElemType
+		arrType = (*arrayType)(ptr(v.Type))
+		theLen = int(arrType.Len)
+		elemType = arrType.ElemType
 	case Slice: // valid
+		isSlice = true
 		elemType = (*sliceType)(ptr(v.Type)).ElemType
 		slcHeader = (*sliceHeader)(v.Ptr)
 		theLen = slcHeader.Len
@@ -474,8 +476,7 @@ func doArray(d *decodeState, v Value) {
 		scanUndo(&d.scan, op)
 
 		// Get element of array, growing if necessary.
-		switch v.Kind() {
-		case Slice:
+		if isSlice {
 			// Grow slice if necessary
 			if i >= slcHeader.Cap {
 				newCap := slcHeader.Cap + slcHeader.Cap/2
@@ -502,7 +503,19 @@ func doArray(d *decodeState, v Value) {
 
 		if i < theLen {
 			// Decode into element.
-			process(d, v.Index(i))
+			if isSlice {
+				process(d, Value{
+					Type: elemType,
+					Ptr:  arrayAt(slcHeader.Data, i, elemType.size),
+					Flag: addressableFlag | pointerFlag | v.ro() | Flag(elemType.Kind()),
+				})
+			} else {
+				process(d, Value{
+					Type: elemType,
+					Ptr:  add(v.Ptr, uintptr(i)*elemType.size),
+					Flag: v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind()), // bits same as overall array,
+				})
+			}
 		} else {
 			// Ran out of fixed array: skip.
 			process(d, Value{})
@@ -526,7 +539,11 @@ func doArray(d *decodeState, v Value) {
 			// Array. Zero the rest.
 			zero := Zero(elemType)
 			for ; i < theLen; i++ {
-				v.Index(i).Set(zero)
+				Value{
+					Type: elemType,
+					Ptr:  add(v.Ptr, uintptr(i)*elemType.size),
+					Flag: v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind()), // bits same as overall array,
+				}.Set(zero)
 			}
 		default:
 			(*sliceHeader)(v.Ptr).Len = i // short version of v.SetLen(i)
@@ -605,7 +622,7 @@ func doMap(d *decodeState, v Value) {
 		// Write value back to map; if using struct, corespValue points into struct already.
 		switch valueTypeKey.Kind() {
 		case String:
-			keyValue := ReflectOn(key).Convert(valueTypeKey)
+			keyValue := valueConvert(ReflectOn(key), valueTypeKey)
 			v.setMapIndex(typedMap, keyValue, mapElem)
 		case Int, Int8, Int16, Int32, Int64:
 			num, err := IntParse(key)
@@ -613,7 +630,7 @@ func doMap(d *decodeState, v Value) {
 				saveError(d, &UnmarshalTypeError{Value: "number " + string(key), Type: valueTypeKey, Offset: int64(start + 1)})
 				return
 			}
-			keyValue := ReflectOn(num).Convert(valueTypeKey)
+			keyValue := valueConvert(ReflectOn(num), valueTypeKey)
 			v.setMapIndex(typedMap, keyValue, mapElem)
 		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 			num, err := UintParse(key)
@@ -621,7 +638,7 @@ func doMap(d *decodeState, v Value) {
 				saveError(d, &UnmarshalTypeError{Value: "number " + string(key), Type: valueTypeKey, Offset: int64(start + 1)})
 				return
 			}
-			keyValue := ReflectOn(num).Convert(valueTypeKey)
+			keyValue := valueConvert(ReflectOn(num), valueTypeKey)
 			v.setMapIndex(typedMap, keyValue, mapElem)
 		}
 
@@ -726,7 +743,7 @@ func doStruct(d *decodeState, v Value) {
 						}
 						corespValue.Set(New(derefType))
 					}
-					corespValue = corespValue.Deref()
+					corespValue = valueDeref(corespValue)
 				}
 
 				corespValue = corespValue.getField(idx)
@@ -921,8 +938,8 @@ func indirect(v Value, decodingNull bool) (Value, bool) {
 		// Load value from interface, but only if the result will be
 		// usefully addressable.
 		if v.Kind() == Interface && !v.IsNil() {
-			e := v.Iface() // .Elem()
-			if e.Kind() == Ptr && !e.IsNil() && (!decodingNull || e.Deref().Kind() == Ptr) {
+			e := valueIface(v)
+			if e.Kind() == Ptr && !e.IsNil() && (!decodingNull || valueDeref(e).Kind() == Ptr) {
 				v = e
 				continue
 			}
@@ -933,7 +950,7 @@ func indirect(v Value, decodingNull bool) (Value, bool) {
 		}
 
 		// now v.Kind() == Ptr
-		if v.Deref().Kind() != Ptr && decodingNull && v.CanSet() {
+		if valueDeref(v).Kind() != Ptr && decodingNull && v.CanSet() {
 			break
 		}
 
@@ -947,7 +964,7 @@ func indirect(v Value, decodingNull bool) (Value, bool) {
 			}
 		}
 
-		v = v.Deref()
+		v = valueDeref(v)
 	}
 	return v, false
 }

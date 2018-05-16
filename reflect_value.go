@@ -394,21 +394,6 @@ func (v Value) pointer() ptr {
 	return v.Ptr
 }
 
-func (v Value) Deref() Value {
-	ptrToV := v.Ptr
-	if v.isPointer() {
-		ptrToV = *(*ptr)(ptrToV)
-	}
-	// The returned value's address is v's value.
-	if ptrToV == nil {
-		return Value{}
-	}
-	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
-	typ := (*ptrType)(ptr(v.Type)).Type
-	fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
-	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
-}
-
 func (v Value) ro() Flag {
 	if !v.isExported() {
 		return stickyROFlag
@@ -465,128 +450,6 @@ func (v Value) packEface() interface{} {
 	return i
 }
 
-func (v Value) assignTo(dst *RType, target ptr) Value {
-	if v.hasMethodFlag() {
-		//v = v.makeMethodValue()
-		panic("Value.assignTo : This is a method.")
-	}
-
-	switch {
-	default:
-		// TODO : shouldn't we fail first?
-		// Failed.
-		panic("reflect.Value.assignTo: value of type ") // + TypeToString(v.Type) + " is not assignable to type " + TypeToString(dst))
-	case v.Type.directlyAssignable(dst):
-		// Overwrite type so that they match. Same memory layout, so no harm done.
-		fl := v.Flag&(addressableFlag|pointerFlag) | v.ro()
-		fl |= Flag(dst.Kind())
-		return Value{Type: dst, Ptr: v.Ptr, Flag: fl}
-
-	case v.Type.implements(dst):
-		if target == nil {
-			target = unsafeNew(dst)
-		}
-		if v.Kind() == Interface && v.IsNil() {
-			// A nil ReadWriter passed to nil Reader is OK, but using ifaceE2I below will panic.
-			// Avoid the panic by returning a nil dst (e.g., Reader) explicitly.
-			return Value{Type: dst, Ptr: nil, Flag: Flag(Interface)}
-		}
-		v.assertE2I(dst, target)
-		return Value{Type: dst, Ptr: target, Flag: pointerFlag | Flag(Interface)}
-	}
-}
-
-func (v Value) assertE2I(dst *RType, target ptr) {
-	// TODO : @badu - Type links to methods
-	//to be read "if NumMethod(dst) == 0{"
-	if (dst.Kind() == Interface && dst.NoOfIfaceMethods() == 0) || (dst.Kind() != Interface && lenExportedMethods(dst) == 0) {
-		// the case of "interface{}"
-		*(*interface{})(target) = v.valueInterface()
-	} else {
-		ifaceE2I(dst, v.valueInterface(), target)
-	}
-}
-
-func (v Value) Index(i int) Value {
-	switch v.Kind() {
-	case Array:
-		tt := (*arrayType)(ptr(v.Type)) // convert to array
-		if uint(i) >= uint(tt.Len) {
-			// TODO : panic
-			return Value{}
-		}
-		typ := tt.ElemType
-		offset := uintptr(i) * typ.size
-		// Either pointerFlag is set and v.ptr points at array, or pointerFlag is not set and v.ptr is the actual array data.
-		// In the former case, we want v.ptr + offset.
-		// In the latter case, we must be doing Index(0), so offset = 0, so v.ptr + offset is still the correct address.
-		val := add(v.Ptr, offset)
-		fl := v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(typ.Kind()) // bits same as overall array
-		return Value{Type: typ, Ptr: val, Flag: fl}
-
-	case Slice:
-		// Element flag same as Deref of ptr.
-		// Addressable, indirect, possibly read-only.
-		s := (*sliceHeader)(v.Ptr)
-		if uint(i) >= uint(s.Len) {
-			// TODO : panic
-			return Value{}
-		}
-		typ := (*sliceType)(ptr(v.Type)).ElemType
-		val := arrayAt(s.Data, i, typ.size)
-		fl := addressableFlag | pointerFlag | v.ro() | Flag(typ.Kind())
-		return Value{Type: typ, Ptr: val, Flag: fl}
-
-	case String:
-		s := (*stringHeader)(v.Ptr)
-		if uint(i) >= uint(s.Len) {
-			// TODO : panic
-			return Value{}
-		}
-		p := arrayAt(s.Data, i, 1)
-		fl := v.ro() | Flag(Uint8) | pointerFlag
-		return Value{Type: uint8Type, Ptr: p, Flag: fl}
-
-	default:
-		// kind checks are performed in public ToSlice(), so this should NEVER happen
-		// TODO : panic
-		return Value{}
-	}
-}
-
-func (v Value) Iface() Value {
-	switch v.Kind() {
-	case Interface:
-		var eface interface{}
-		if v.Type.NoOfIfaceMethods() == 0 {
-			// the case of "interface{}"
-			eface = *(*interface{})(v.Ptr)
-		} else {
-			eface = *(*interface{ M() })(v.Ptr)
-		}
-		// unpackEface converts the empty interface 'eface' to a Value.
-		e := (*ifaceRtype)(ptr(&eface))
-		// NOTE: don't read e.word until we know whether it is really a pointer or not.
-		if e.Type == nil {
-			panic("Invalid IFACE")
-			// it's invalid
-			return Value{}
-		}
-		f := Flag(e.Type.Kind())
-		if e.Type.isDirectIface() {
-			f |= pointerFlag
-		}
-		x := Value{Type: e.Type, Ptr: e.word, Flag: f}
-		if x.IsValid() {
-			x.Flag |= v.ro()
-		}
-		return x
-	default:
-		panic("Not IFACE.")
-		return v
-	}
-}
-
 func (v Value) getField(i int) Value {
 	field := &(*structType)(ptr(v.Type)).fields[i]
 
@@ -610,21 +473,7 @@ func (v Value) getField(i int) Value {
 // ==============
 // Setters
 // ==============
-func (v Value) CanSet() bool                     { return v.Flag&(addressableFlag|exportFlag) == addressableFlag }
-func (v Value) cvtBytesString(t *RType) Value    { return makeString(v.ro(), string(*(*[]byte)(v.Ptr)), t) } // convert operation: []byte -> string
-func (v Value) cvtRunesString(t *RType) Value    { return makeString(v.ro(), string(*(*[]rune)(v.Ptr)), t) } // convert operation: []rune -> string
-func (v Value) cvtStringBytes(t *RType) Value    { return makeBytes(v.ro(), []byte(*(*string)(v.Ptr)), t) }  // convert operation: string -> []byte
-func (v Value) cvtStringRunes(t *RType) Value    { return makeRunes(v.ro(), []rune(*(*string)(v.Ptr)), t) }  // convert operation: string -> []rune
-func (v Value) cvtIntInt(t *RType) Value         { return makeInt(v.ro(), uint64(v.Int()), t) }              // convert operation: intXX -> [u]intXX
-func (v Value) cvtUintUint(t *RType) Value       { return makeInt(v.ro(), v.Uint(), t) }                     // convert operation: uintXX -> [u]intXX
-func (v Value) cvtFloatInt(t *RType) Value       { return makeInt(v.ro(), uint64(int64(v.Float())), t) }     // convert operation: floatXX -> intXX
-func (v Value) cvtFloatUint(t *RType) Value      { return makeInt(v.ro(), uint64(v.Float()), t) }            // convert operation: floatXX -> uintXX
-func (v Value) cvtIntFloat(t *RType) Value       { return makeFloat(v.ro(), float64(v.Int()), t) }           // convert operation: intXX -> floatXX
-func (v Value) cvtUintFloat(t *RType) Value      { return makeFloat(v.ro(), float64(v.Uint()), t) }          // convert operation: uintXX -> floatXX
-func (v Value) cvtFloatFloat(t *RType) Value     { return makeFloat(v.ro(), v.Float(), t) }                  // convert operation: floatXX -> floatXX
-func (v Value) cvtComplexComplex(t *RType) Value { return makeComplex(v.ro(), v.Complex(), t) }              // convert operation: complexXX -> complexXX
-func (v Value) cvtIntString(t *RType) Value      { return makeString(v.ro(), string(v.Int()), t) }           // convert operation: intXX -> string
-func (v Value) cvtUintString(t *RType) Value     { return makeString(v.ro(), string(v.Uint()), t) }          // convert operation: uintXX -> string
+func (v Value) CanSet() bool { return v.Flag&(addressableFlag|exportFlag) == addressableFlag }
 
 func (v Value) Complex() complex128 {
 	switch v.Kind() {
@@ -676,137 +525,12 @@ func (v Value) Uint() uint64 {
 	}
 }
 
-// convert operation: direct copy
-func (v Value) cvtDirect(typ *RType) Value {
-	f := v.Flag
-	ptr := v.Ptr
-	if v.CanAddr() {
-		// indirect, mutable word - make a copy
-		c := unsafeNew(typ)
-		typedmemmove(typ, c, ptr)
-		ptr = c
-		f &^= addressableFlag
-	}
-	return Value{Type: typ, Ptr: ptr, Flag: v.ro() | f}
-}
-
-// convert operation: concrete -> interface
-func (v Value) cvtT2I(typ *RType) Value {
-	target := unsafeNew(typ)
-	v.assertE2I(typ, target)
-	return Value{Type: typ, Ptr: target, Flag: v.ro() | pointerFlag | Flag(Interface)}
-}
-
-// convert operation: interface -> interface
-func (v Value) cvtI2I(typ *RType) Value {
-	if v.IsNil() {
-		ret := Zero(typ)
-		ret.Flag |= v.ro()
-		return ret
-	}
-	switch v.Kind() {
-	case Ptr:
-		return v.Deref().cvtT2I(typ)
-	case Interface:
-		return v.Iface().cvtT2I(typ)
-	default:
-		return v.cvtT2I(typ)
-	}
-}
-
-func (v Value) Convert(dst *RType) Value {
-	if v.hasMethodFlag() {
-		panic("Value.Convert : This is a method.")
-		//v = v.makeMethodValue()
-	}
-	t := v.Type
-	destKind := dst.Kind()
-	srcKind := t.Kind()
-
-	switch srcKind {
-	case Int, Int8, Int16, Int32, Int64:
-		switch destKind {
-		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return v.cvtIntInt(dst)
-		case Float32, Float64:
-			return v.cvtIntFloat(dst)
-		case String:
-			return v.cvtIntString(dst)
-		}
-	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-		switch destKind {
-		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return v.cvtUintUint(dst)
-		case Float32, Float64:
-			return v.cvtUintFloat(dst)
-		case String:
-			return v.cvtUintString(dst)
-		}
-	case Float32, Float64:
-		switch destKind {
-		case Int, Int8, Int16, Int32, Int64:
-			return v.cvtFloatInt(dst)
-		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return v.cvtFloatUint(dst)
-		case Float32, Float64:
-			return v.cvtFloatFloat(dst)
-		}
-	case Complex64, Complex128:
-		switch destKind {
-		case Complex64, Complex128:
-			return v.cvtComplexComplex(dst)
-		}
-	case String:
-		sliceElem := (*sliceType)(ptr(dst)).ElemType
-		if destKind == Slice && sliceElem.pkgPathLen() == 0 {
-			switch sliceElem.Kind() {
-			case Uint8:
-				return v.cvtStringBytes(dst)
-			case Int32:
-				return v.cvtStringRunes(dst)
-			}
-		}
-	case Slice:
-		sliceElem := (*sliceType)(ptr(t)).ElemType
-		if destKind == String && sliceElem.pkgPathLen() == 0 {
-			switch sliceElem.Kind() {
-			case Uint8:
-				return v.cvtBytesString(dst)
-			case Int32:
-				return v.cvtRunesString(dst)
-			}
-		}
-	}
-
-	// dst and src have same underlying type.
-	if t.haveIdenticalUnderlyingType(dst, false) {
-		return v.cvtDirect(dst)
-	}
-	derefType := (*ptrType)(ptr(t)).Type
-	destDerefType := (*ptrType)(ptr(dst)).Type
-	// dst and src are unnamed pointer types with same underlying base type.
-	if destKind == Ptr && !dst.hasName() &&
-		srcKind == Ptr && !t.hasName() &&
-		derefType.haveIdenticalUnderlyingType(destDerefType, false) {
-		return v.cvtDirect(dst)
-	}
-
-	if t.implements(dst) {
-		if srcKind == Interface {
-			return v.cvtI2I(dst)
-		}
-		return v.cvtT2I(dst)
-	}
-
-	panic("reflect.Value.Convert: value of type ") // + TypeToString(v.Type) + " cannot be converted to type " + TypeToString(t))
-}
-
 func (v Value) Set(toX Value) {
 	var target ptr
 	if v.Kind() == Interface {
 		target = v.Ptr
 	}
-	toX = toX.assignTo(v.Type, target)
+	valueAssignTo(&toX, v.Type, target)
 	if toX.isPointer() {
 		typedmemmove(v.Type, v.Ptr, toX.Ptr)
 	} else {
@@ -815,7 +539,7 @@ func (v Value) Set(toX Value) {
 }
 
 func (v Value) setMapIndex(mapType *mapType, key, value Value) {
-	key = key.assignTo(mapType.KeyType, nil)
+	valueAssignTo(&key, mapType.KeyType, nil)
 	var keyPtr ptr
 	if key.isPointer() {
 		keyPtr = key.Ptr
@@ -823,7 +547,7 @@ func (v Value) setMapIndex(mapType *mapType, key, value Value) {
 		keyPtr = ptr(&key.Ptr)
 	}
 
-	value = value.assignTo(mapType.ElemType, nil)
+	valueAssignTo(&value, mapType.ElemType, nil)
 	var elemPtr ptr
 	if value.isPointer() {
 		elemPtr = value.Ptr
