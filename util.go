@@ -8,7 +8,7 @@ package json
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -426,7 +426,7 @@ func convertNumber(from []byte, useNumber bool) (interface{}, error) {
 	}
 	f, err := Atof64(from)
 	if err != nil {
-		return nil, fmt.Errorf("invalid number") //&UnmarshalTypeError{Value: "number " + string(from), Type: TypeOf(0.0), Offset: int64(d.offset)}
+		return nil, errors.New("invalid number") //&UnmarshalTypeError{Value: "number " + string(from), Type: TypeOf(0.0), Offset: int64(d.offset)}
 	}
 	return f, nil
 }

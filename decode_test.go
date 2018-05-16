@@ -297,7 +297,7 @@ var unmarshalTests = []unmarshalTest{
 	{in: "null", ptr: new(interface{}), out: nil},
 	{in: `{"X": [1,2,3], "Y": 4}`, ptr: new(T), out: T{Y: 4}, err: &UnmarshalTypeError{"array", TypeOf(""), 7, "T", "X"}},
 	{in: `{"x": 1}`, ptr: new(tx), out: tx{}},
-	{in: `{"x": 1}`, ptr: new(tx), err: fmt.Errorf("json: unknown field \"x\""), disallowUnknownFields: true},
+	{in: `{"x": 1}`, ptr: new(tx), err: fmt.Errorf("json: unknown field x"), disallowUnknownFields: true},
 	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: float64(1), F2: int32(2), F3: Number("3")}},
 	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: Number("1"), F2: int32(2), F3: Number("3")}, useNumber: true},
 	{in: `{"k1":1,"k2":"s","k3":[1,2.0,3e-3],"k4":{"kk1":"s","kk2":2}}`, ptr: new(interface{}), out: ifaceNumAsFloat64},
@@ -312,13 +312,13 @@ var unmarshalTests = []unmarshalTest{
 
 	// Z has a "-" tag.
 	{in: `{"Y": 1, "Z": 2}`, ptr: new(T), out: T{Y: 1}},
-	{in: `{"Y": 1, "Z": 2}`, ptr: new(T), err: fmt.Errorf("json: unknown field \"Z\""), disallowUnknownFields: true},
+	{in: `{"Y": 1, "Z": 2}`, ptr: new(T), err: fmt.Errorf("json: unknown field Z"), disallowUnknownFields: true},
 
 	{in: `{"alpha": "abc", "alphabet": "xyz"}`, ptr: new(U), out: U{Alphabet: "abc"}},
-	{in: `{"alpha": "abc", "alphabet": "xyz"}`, ptr: new(U), err: fmt.Errorf("json: unknown field \"alphabet\""), disallowUnknownFields: true},
+	{in: `{"alpha": "abc", "alphabet": "xyz"}`, ptr: new(U), err: fmt.Errorf("json: unknown field alphabet"), disallowUnknownFields: true},
 	{in: `{"alpha": "abc"}`, ptr: new(U), out: U{Alphabet: "abc"}},
 	{in: `{"alphabet": "xyz"}`, ptr: new(U), out: U{}},
-	{in: `{"alphabet": "xyz"}`, ptr: new(U), err: fmt.Errorf("json: unknown field \"alphabet\""), disallowUnknownFields: true},
+	{in: `{"alphabet": "xyz"}`, ptr: new(U), err: fmt.Errorf("json: unknown field alphabet"), disallowUnknownFields: true},
 
 	// syntax errors
 	{in: `{"X": "foo", "Y"}`, err: &SyntaxError{"invalid character '}' expected ':' after object key", 17}},
@@ -487,7 +487,7 @@ var unmarshalTests = []unmarshalTest{
 	{
 		in:  `{"X": 1,"Y":2}`,
 		ptr: new(S5),
-		err: fmt.Errorf("json: unknown field \"X\""),
+		err: fmt.Errorf("json: unknown field X"),
 		disallowUnknownFields: true,
 	},
 	{
@@ -498,7 +498,7 @@ var unmarshalTests = []unmarshalTest{
 	{
 		in:  `{"X": 1,"Y":2}`,
 		ptr: new(S10),
-		err: fmt.Errorf("json: unknown field \"X\""),
+		err: fmt.Errorf("json: unknown field X"),
 		disallowUnknownFields: true,
 	},
 
@@ -634,11 +634,11 @@ var unmarshalTests = []unmarshalTest{
 	// invalid inputs in wrongStringTests below.
 	{in: `{"B":"true"}`, ptr: new(B), out: B{true}, golden: true},
 	{in: `{"B":"false"}`, ptr: new(B), out: B{false}, golden: true},
-	{in: `{"B": "maybe"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal "maybe" into bool`)},
-	{in: `{"B": "tru"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal "tru" into bool`)},
-	{in: `{"B": "False"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal "False" into bool`)},
+	{in: `{"B": "maybe"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal maybe into bool`)},
+	{in: `{"B": "tru"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal tru into bool`)},
+	{in: `{"B": "False"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal False into bool`)},
 	{in: `{"B": "null"}`, ptr: new(B), out: B{false}},
-	{in: `{"B": "nul"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal "nul" into bool`)},
+	{in: `{"B": "nul"}`, ptr: new(B), err: errors.New(`json: invalid use of ,string struct tag, trying to unmarshal nul into bool`)},
 
 	// additional tests for useStrict
 	{
@@ -665,7 +665,7 @@ var unmarshalTests = []unmarshalTest{
 			"extra": true
 		}`,
 		ptr: new(Top),
-		err: fmt.Errorf("json: unknown field \"extra\""),
+		err: fmt.Errorf("json: unknown field extra"),
 		disallowUnknownFields: true,
 	},
 	{
@@ -692,7 +692,7 @@ var unmarshalTests = []unmarshalTest{
 			"Q": 18
 		}`,
 		ptr: new(Top),
-		err: fmt.Errorf("json: unknown field \"extra\""),
+		err: fmt.Errorf("json: unknown field extra"),
 		disallowUnknownFields: true,
 	},
 }
@@ -977,8 +977,8 @@ type wrongStringTest struct {
 }
 
 var wrongStringTests = []wrongStringTest{
-	{`{"result":"x"}`, `json: invalid use of ,string struct tag, trying to unmarshal "x" into string`},
-	{`{"result":"foo"}`, `json: invalid use of ,string struct tag, trying to unmarshal "foo" into string`},
+	{`{"result":"x"}`, `json: invalid use of ,string struct tag, trying to unmarshal x into string`},
+	{`{"result":"foo"}`, `json: invalid use of ,string struct tag, trying to unmarshal foo into string`},
 	{`{"result":"123"}`, `json: cannot unmarshal number into Go struct field WrongString.result of type string`},
 	{`{"result":123}`, `json: invalid use of ,string struct tag, trying to unmarshal unquoted value into string`},
 }

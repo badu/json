@@ -767,17 +767,31 @@ func doStruct(d *decodeState, v Value) {
 			default:
 				saveError(d, errors.New("json: should never happen, because we're expecting begin literal, but received operation "+string(FormatInt(int64(op)))))
 			case scanBeginLiteral:
-				switch va := literalInterface(d).(type) {
-				case nil:
+				// All bytes inside literal return scanContinue op code.
+				start := d.offset - 1
+				op := scanWhile(d, scanContinue)
+
+				// Scan read one byte too far; back up.
+				d.offset--
+				scanUndo(&d.scan, op)
+				item := d.data[start:d.offset]
+
+				switch c := item[0]; c {
+				case nChr: // null
 					// setting null to corespValue
 					switch corespValue.Kind() {
 					case Interface, Ptr, Map, Slice:
 						corespValue.Set(Zero(corespValue.Type))
 						// otherwise, ignore null for primitives/string
 					}
-				case string:
-					literalStore(d, []byte(va), corespValue)
-				default:
+				case quote: // string
+					s, ok := unquote(item)
+					if !ok {
+						decodeError(d, errPhase)
+					}
+					literalStore(d, []byte(s), corespValue)
+
+				default: // number
 					saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into "+corespValue.Type.String()))
 				}
 			}
