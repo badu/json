@@ -328,18 +328,6 @@ type (
 		Len  int
 	}
 
-	// SliceHeader is the runtime representation of a slice.
-	// It cannot be used safely or portable and its representation may
-	// change in a later release.
-	// Moreover, the Data field is not sufficient to guarantee the data
-	// it references will not be garbage collected, so programs must keep
-	// a separate, correctly typed pointer to the underlying data.
-	SliceHeader struct {
-		Data uintptr
-		Len  int
-		Cap  int
-	}
-
 	// sliceHeader is a safe version of SliceHeader used within this package.
 	// (COMPILER)
 	sliceHeader struct {

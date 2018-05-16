@@ -454,28 +454,31 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 	isSlice := false
 	var slcHeader *sliceHeader
 	var fl Flag
+	var arrElemType *RType
 	switch v.Kind() {
 	case Array:
-		arrType := (*arrayType)(ptr(v.Type))
+		arrType := (*arrayType)(ptr(v.Type)) // convert to array
+		arrElemType = arrType.ElemType
 		arrLen = int(arrType.Len)
-		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(ae.elemType.Kind())
+		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(arrType.Kind())
 	case Slice:
 		isSlice = true
+		arrElemType = (*sliceType)(ptr(v.Type)).ElemType
 		slcHeader = (*sliceHeader)(v.Ptr)
 		arrLen = slcHeader.Len
-		fl = addressableFlag | pointerFlag | v.ro() | Flag(ae.elemType.Kind())
+		fl = addressableFlag | pointerFlag | v.ro() | Flag(arrElemType.Kind())
 	}
 	// doesn't seem to help much, but we're reusing it anyway
-	daVal := Value{Type: ae.elemType, Flag: fl}
+	daVal := Value{Type: arrElemType, Flag: fl}
 	for i := 0; i < arrLen; i++ {
 		if i > 0 {
 			// Next Array Element
 			e.WriteByte(comma)
 		}
 		if isSlice {
-			daVal.Ptr = arrayAt(slcHeader.Data, i, ae.elemType.size)
+			daVal.Ptr = arrayAt(slcHeader.Data, i, arrElemType.size)
 		} else {
-			daVal.Ptr = add(v.Ptr, uintptr(i)*ae.elemType.size)
+			daVal.Ptr = add(v.Ptr, uintptr(i)*arrElemType.size)
 		}
 		ae.encs[0](e, daVal)
 	}
@@ -489,7 +492,8 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 	e.WriteByte(curlOpen)
 
 	first := true
-	for i, curField := range ae.fields {
+	fieldsInfo := getCachedFields(v.Type)
+	for i, curField := range fieldsInfo {
 		// restoring to original value type, since it gets altered below
 		fieldValue := v
 
@@ -612,8 +616,10 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
+
+	mapElemType := (*mapType)(ptr(v.Type)).ElemType
 	// prepare easy access
-	fl := v.ro() | Flag(ae.elemType.Kind())
+	fl := v.ro() | Flag(mapElemType.Kind())
 	vPointer := v.pointer()
 
 	// prepare map keys
@@ -670,7 +676,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			return false
 		})
 		// doesn't seem to help much, but we're reusing it anyway
-		daVal := Value{Type: ae.elemType}
+		daVal := Value{Type: mapElemType}
 		for j, key := range result {
 			if j > 0 {
 				e.WriteByte(comma)
@@ -686,10 +692,10 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			}
 			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 			if elemPtr != nil {
-				if ae.elemType.isDirectIface() {
+				if mapElemType.isDirectIface() {
 					// Copy result so future changes to the map won't change the underlying value.
-					mapElemValue := unsafeNew(ae.elemType)
-					typedmemmove(ae.elemType, mapElemValue, elemPtr)
+					mapElemValue := unsafeNew(mapElemType)
+					typedmemmove(mapElemType, mapElemValue, elemPtr)
 					daVal.Ptr = mapElemValue
 					daVal.Flag = fl | pointerFlag | key.value.ro()
 				} else {
@@ -722,7 +728,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		break
 	}
 	// doesn't seem to help much, but we're reusing it anyway
-	daVal := Value{Type: ae.elemType}
+	daVal := Value{Type: mapElemType}
 	// default, unsorted map keys
 	for i, key := range mapKeys {
 		var keyName []byte
@@ -749,10 +755,10 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		}
 		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
 		if elemPtr != nil {
-			if ae.elemType.isDirectIface() {
+			if mapElemType.isDirectIface() {
 				// Copy result so future changes to the map won't change the underlying value.
-				mapElemValue := unsafeNew(ae.elemType)
-				typedmemmove(ae.elemType, mapElemValue, elemPtr)
+				mapElemValue := unsafeNew(mapElemType)
+				typedmemmove(mapElemType, mapElemValue, elemPtr)
 				daVal.Ptr = mapElemValue
 				daVal.Flag = fl | pointerFlag | key.ro()
 			} else {
@@ -867,8 +873,8 @@ func newPtrEncoder(t *RType) *allEncoder {
 func newStructEncoder(t *RType) *allEncoder {
 	fieldsInfo := getCachedFields(t)
 	se := allEncoder{
-		fields: fieldsInfo,
-		encs:   make([]encoderFunc, len(fieldsInfo)),
+		//fields: fieldsInfo,
+		encs: make([]encoderFunc, len(fieldsInfo)),
 	}
 
 	for i, curField := range fieldsInfo {
@@ -894,19 +900,16 @@ func newSliceEncoder(t *RType) *allEncoder {
 func newArrayEncoder(t *RType) *allEncoder {
 	switch t.Kind() {
 	case Array:
-		arr := (*arrayType)(ptr(t)) // convert to array
-		return &allEncoder{encs: encFns{typeEncoder(arr.ElemType)}, elemType: arr.ElemType}
+		return &allEncoder{encs: encFns{typeEncoder((*arrayType)(ptr(t)).ElemType)}}
 	case Slice:
-		slc := (*sliceType)(ptr(t))
-		return &allEncoder{encs: encFns{typeEncoder(slc.ElemType)}, elemType: slc.ElemType}
+		return &allEncoder{encs: encFns{typeEncoder((*sliceType)(ptr(t)).ElemType)}}
 	default:
 		panic("Not Array, nor Slice")
 	}
 }
 
 func newMapEncoder(t *RType) *allEncoder {
-	mapInfo := (*mapType)(ptr(t))
-	return &allEncoder{encs: encFns{typeEncoder(mapInfo.ElemType)}, elemType: mapInfo.ElemType}
+	return &allEncoder{encs: encFns{typeEncoder((*mapType)(ptr(t)).ElemType)}}
 }
 
 func typeEncoder(t *RType) encoderFunc {

@@ -327,9 +327,7 @@ type (
 	encFns      []encoderFunc
 
 	allEncoder struct {
-		fields   marshalFields
-		encs     encFns
-		elemType *RType
+		encs encFns
 	}
 )
 
