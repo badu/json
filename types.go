@@ -360,8 +360,8 @@ var (
 	encodeStatePool sync.Pool
 
 	typeOfNo                    = TypeOf(Number(""))
-	marshalerType               = TypeOf(new(Marshaler)).Deref()
-	unmarshalerType             = TypeOf(new(Unmarshaler)).Deref()
+	marshalerType               = (*ptrType)(ptr(TypeOf(new(Marshaler)))).Type
+	unmarshalerType             = (*ptrType)(ptr(TypeOf(new(Unmarshaler)))).Type
 	_               Marshaler   = (*RawMessage)(nil)
 	_               Unmarshaler = (*RawMessage)(nil)
 

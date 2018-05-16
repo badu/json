@@ -14,21 +14,13 @@ import (
 func (t *RType) hasPointers() bool                { return t.kind&kindNoPointers == 0 }
 func (t *RType) isDirectIface() bool              { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
 func (t *RType) Kind() Kind                       { return Kind(t.kind & kindMask) }
-func (t *RType) convToPtr() *ptrType              { return (*ptrType)(ptr(t)) }
 func (t *RType) hasExtraStar() bool               { return t.extraTypeFlag&hasExtraStarFlag != 0 }
 func (t *RType) nameOffset(offset nameOff) name   { return name{(*byte)(resolveNameOff(ptr(t), offset))} }
 func (t *RType) nameOffsetStr() name              { return name{(*byte)(resolveNameOff(ptr(t), t.str))} }
-func (t *RType) convToStruct() *structType        { return (*structType)(ptr(t)) }
-func (t *RType) convToFn() *funcType              { return (*funcType)(ptr(t)) }
 func (t *RType) typeOffset(offset typeOff) *RType { return (*RType)(resolveTypeOff(ptr(t), offset)) }
-func (t *RType) convToIface() *ifaceType          { return (*ifaceType)(ptr(t)) }
-func (t *RType) ConvToMap() *mapType              { return (*mapType)(ptr(t)) }
-func (t *RType) ConvToSlice() *sliceType          { return (*sliceType)(ptr(t)) }
-func (t *RType) ConvToArray() *arrayType          { return (*arrayType)(ptr(t)) }
-func (t *RType) Deref() *RType                    { return (*ptrType)(ptr(t)).Type }
 func (t *RType) hasInfoFlag() bool                { return t.extraTypeFlag&hasExtraInfoFlag != 0 }
-func (t *RType) NoOfIfaceMethods() int            { return len(t.ifaceMethods()) }
-func (t *RType) ifaceMethods() []ifaceMethod      { return t.convToIface().methods }
+func (t *RType) NoOfIfaceMethods() int            { return len((*ifaceType)(ptr(t)).methods) }
+func (t *RType) ifaceMethods() []ifaceMethod      { return (*ifaceType)(ptr(t)).methods }
 func (t *RType) isAnon() bool                     { return t.extraTypeFlag&hasNameFlag == 0 }
 func (t *RType) hasName() bool                    { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
 
@@ -65,7 +57,7 @@ func (t *RType) PtrTo() *RType {
 	typeName := byteSliceFromParams(star, t.nomen())
 	for _, existingType := range typesByString(typeName) {
 		// Attention : cannot use .Deref() here because below we need to return the pointer to the *Type
-		pointerType := existingType.convToPtr()
+		pointerType := (*ptrType)(ptr(existingType))
 		if pointerType.Type != t {
 			continue
 		}
@@ -187,8 +179,9 @@ func (t *RType) haveIdenticalUnderlyingType(dest *RType, cmpTags bool) bool {
 	// Composite types.
 	switch kind {
 	case Array:
-		destArray := dest.ConvToArray()
-		return destArray.Len == t.ConvToArray().Len && t.haveIdenticalType(destArray.ElemType, cmpTags)
+		destArray := (*arrayType)(ptr(dest)) // convert to array
+		srcArray := (*arrayType)(ptr(t))     // convert to array
+		return destArray.Len == srcArray.Len && t.haveIdenticalType(destArray.ElemType, cmpTags)
 	case Func:
 		panic("haveIdenticalUnderlyingType: Comparing Func")
 		return true
@@ -202,14 +195,18 @@ func (t *RType) haveIdenticalUnderlyingType(dest *RType, cmpTags bool) bool {
 		// Might have the same methods but still need a run time conversion.
 		return false
 	case Map:
-		return t.ConvToMap().KeyType.haveIdenticalType(dest.ConvToMap().KeyType, cmpTags) && t.ConvToMap().ElemType.haveIdenticalType(dest.ConvToMap().ElemType, cmpTags)
+		typedMap := (*mapType)(ptr(t))
+		destTypedMap := (*mapType)(ptr(dest))
+		return typedMap.KeyType.haveIdenticalType(destTypedMap.KeyType, cmpTags) && typedMap.ElemType.haveIdenticalType(destTypedMap.ElemType, cmpTags)
 	case Slice:
-		return t.ConvToSlice().ElemType.haveIdenticalType(dest.ConvToSlice().ElemType, cmpTags)
+		return (*sliceType)(ptr(t)).ElemType.haveIdenticalType((*sliceType)(ptr(dest)).ElemType, cmpTags)
 	case Ptr:
-		return t.Deref().haveIdenticalType(dest.Deref(), cmpTags)
+		derefType := (*ptrType)(ptr(t)).Type
+		destDerefType := (*ptrType)(ptr(dest)).Type
+		return derefType.haveIdenticalType(destDerefType, cmpTags)
 	case Struct:
-		destStruct := dest.convToStruct()
-		srcStruct := t.convToStruct()
+		destStruct := (*structType)(ptr(dest))
+		srcStruct := (*structType)(ptr(t))
 		if len(destStruct.fields) != len(srcStruct.fields) {
 			return false
 		}
@@ -255,7 +252,7 @@ func (t *RType) addTypeBits(vec *bitVector, offset uintptr) {
 		appendBitVector(vec, 1)
 	case Array:
 		// repeat inner type
-		tArray := t.ConvToArray()
+		tArray := (*arrayType)(ptr(t)) // convert to array
 		for i := 0; i < int(tArray.Len); i++ {
 			if tArray.ElemType.hasPointers() {
 				tArray.ElemType.addTypeBits(vec, offset+uintptr(i)*tArray.ElemType.size)
@@ -263,7 +260,7 @@ func (t *RType) addTypeBits(vec *bitVector, offset uintptr) {
 		}
 	case Struct:
 		// apply fields
-		structType := t.convToStruct()
+		structType := (*structType)(ptr(t))
 		for i := range structType.fields {
 			field := &structType.fields[i]
 			if field.Type.hasPointers() {
@@ -280,7 +277,7 @@ func (t *RType) implements(dest *RType) bool {
 	if dest.Kind() != Interface {
 		return false
 	}
-	destIntf := dest.convToIface()
+	destIntf := (*ifaceType)(ptr(dest))
 	// the case of "interface{}"
 	if len(destIntf.methods) == 0 {
 		return true
@@ -292,7 +289,7 @@ func (t *RType) implements(dest *RType) bool {
 	// This lets us run the scan in overall linear time instead of the quadratic time  a naive search would require.
 	// See also ../runtime/iface.go.
 	if t.Kind() == Interface {
-		srcIntf := t.convToIface()
+		srcIntf := (*ifaceType)(ptr(t))
 		i := 0
 		for j := 0; j < len(srcIntf.methods); j++ {
 			destMethod := &destIntf.methods[i]
@@ -375,13 +372,13 @@ func (v Value) IsNil() bool {
 		}
 		ptrToV := v.Ptr
 		if v.isPointer() {
-			ptrToV = convPtr(ptrToV)
+			ptrToV = *(*ptr)(ptrToV)
 		}
 		return ptrToV == nil
 	case Interface, Slice:
 		// Both interface and slice are nil if first word is 0.
 		// Both are always bigger than a word; assume pointerFlag.
-		return convPtr(v.Ptr) == nil
+		return *(*ptr)(v.Ptr) == nil
 	default:
 		return true
 	}
@@ -392,7 +389,7 @@ func (v Value) pointer() ptr {
 		return nil
 	}
 	if v.isPointer() {
-		return convPtr(v.Ptr)
+		return *(*ptr)(v.Ptr)
 	}
 	return v.Ptr
 }
@@ -400,14 +397,14 @@ func (v Value) pointer() ptr {
 func (v Value) Deref() Value {
 	ptrToV := v.Ptr
 	if v.isPointer() {
-		ptrToV = convPtr(ptrToV)
+		ptrToV = *(*ptr)(ptrToV)
 	}
 	// The returned value's address is v's value.
 	if ptrToV == nil {
 		return Value{}
 	}
 	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
-	typ := v.Type.Deref()
+	typ := (*ptrType)(ptr(v.Type)).Type
 	fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
 	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
 }
@@ -431,9 +428,9 @@ func (v Value) valueInterface() interface{} {
 		// Empty interface has one layout, all interfaces with methods have a second layout.
 		if v.Type.NoOfIfaceMethods() == 0 {
 			// the case of "interface{}"
-			return convIface(v.Ptr)
+			return *(*interface{})(v.Ptr)
 		}
-		return convIfaceMeth(v.Ptr)
+		return *(*interface{ M() })(v.Ptr)
 	}
 
 	return v.packEface()
@@ -441,7 +438,7 @@ func (v Value) valueInterface() interface{} {
 
 func (v Value) packEface() interface{} {
 	var i interface{}
-	e := toIface(ptr(&i))
+	e := (*ifaceRtype)(ptr(&i))
 	// First, fill in the data portion of the interface.
 	switch {
 	case v.Type.isDirectIface():
@@ -458,7 +455,7 @@ func (v Value) packEface() interface{} {
 		e.word = ptr
 	case v.isPointer():
 		// Value is indirect, but interface is direct. We need to load the data at v.ptr into the interface data word.
-		e.word = convPtr(v.Ptr)
+		e.word = *(*ptr)(v.Ptr)
 	default:
 		// Value is direct, and so is the interface.
 		e.word = v.Ptr
@@ -504,7 +501,7 @@ func (v Value) assertE2I(dst *RType, target ptr) {
 	//to be read "if NumMethod(dst) == 0{"
 	if (dst.Kind() == Interface && dst.NoOfIfaceMethods() == 0) || (dst.Kind() != Interface && lenExportedMethods(dst) == 0) {
 		// the case of "interface{}"
-		loadConvIface(target, v.valueInterface())
+		*(*interface{})(target) = v.valueInterface()
 	} else {
 		ifaceE2I(dst, v.valueInterface(), target)
 	}
@@ -513,7 +510,7 @@ func (v Value) assertE2I(dst *RType, target ptr) {
 func (v Value) Index(i int) Value {
 	switch v.Kind() {
 	case Array:
-		tt := v.Type.ConvToArray()
+		tt := (*arrayType)(ptr(v.Type)) // convert to array
 		if uint(i) >= uint(tt.Len) {
 			// TODO : panic
 			return Value{}
@@ -535,7 +532,7 @@ func (v Value) Index(i int) Value {
 			// TODO : panic
 			return Value{}
 		}
-		typ := v.Type.ConvToSlice().ElemType
+		typ := (*sliceType)(ptr(v.Type)).ElemType
 		val := arrayAt(s.Data, i, typ.size)
 		fl := addressableFlag | pointerFlag | v.ro() | Flag(typ.Kind())
 		return Value{Type: typ, Ptr: val, Flag: fl}
@@ -563,12 +560,12 @@ func (v Value) Iface() Value {
 		var eface interface{}
 		if v.Type.NoOfIfaceMethods() == 0 {
 			// the case of "interface{}"
-			eface = convIface(v.Ptr)
+			eface = *(*interface{})(v.Ptr)
 		} else {
-			eface = convIfaceMeth(v.Ptr)
+			eface = *(*interface{ M() })(v.Ptr)
 		}
 		// unpackEface converts the empty interface 'eface' to a Value.
-		e := toIface(ptr(&eface))
+		e := (*ifaceRtype)(ptr(&eface))
 		// NOTE: don't read e.word until we know whether it is really a pointer or not.
 		if e.Type == nil {
 			panic("Invalid IFACE")
@@ -589,54 +586,9 @@ func (v Value) Iface() Value {
 		return v
 	}
 }
-func (v Value) isEmptyValue() bool {
-	switch v.Kind() {
-	case Map:
-		return maplen(v.pointer()) == 0
-	case Array:
-		return v.Type.ConvToArray().Len == 0
-	case Slice:
-		return (*sliceHeader)(v.Ptr).Len == 0
-	case String:
-		return (*stringHeader)(v.Ptr).Len == 0
-	case Bool:
-		return !*(*bool)(v.Ptr)
-	case Int:
-		return *(*int)(v.Ptr) == 0
-	case Int8:
-		return *(*int8)(v.Ptr) == 0
-	case Int16:
-		return *(*int16)(v.Ptr) == 0
-	case Int32:
-		return *(*int32)(v.Ptr) == 0
-	case Int64:
-		return *(*int64)(v.Ptr) == 0
-	case Uint:
-		return *(*uint)(v.Ptr) == 0
-	case Uint8:
-		return *(*uint8)(v.Ptr) == 0
-	case Uint16:
-		return *(*uint16)(v.Ptr) == 0
-	case Uint32:
-		return *(*uint32)(v.Ptr) == 0
-	case Uint64:
-		return *(*uint64)(v.Ptr) == 0
-	case UintPtr:
-		return *(*uintptr)(v.Ptr) == 0
-	case Float32:
-		return *(*float32)(v.Ptr) == 0
-	case Float64:
-		return *(*float64)(v.Ptr) == 0
-	case Interface:
-		return convPtr(v.Ptr) == nil
-	case Ptr:
-		return v.IsNil()
-	}
-	return false
-}
 
 func (v Value) getField(i int) Value {
-	field := &v.Type.convToStruct().fields[i]
+	field := &(*structType)(ptr(v.Type)).fields[i]
 
 	// Inherit permission bits from v, but clear embedROFlag.
 	fl := v.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(field.Type.Kind())
@@ -805,7 +757,7 @@ func (v Value) Convert(dst *RType) Value {
 			return v.cvtComplexComplex(dst)
 		}
 	case String:
-		sliceElem := dst.ConvToSlice().ElemType
+		sliceElem := (*sliceType)(ptr(dst)).ElemType
 		if destKind == Slice && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
@@ -815,7 +767,7 @@ func (v Value) Convert(dst *RType) Value {
 			}
 		}
 	case Slice:
-		sliceElem := t.ConvToSlice().ElemType
+		sliceElem := (*sliceType)(ptr(t)).ElemType
 		if destKind == String && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
@@ -830,11 +782,12 @@ func (v Value) Convert(dst *RType) Value {
 	if t.haveIdenticalUnderlyingType(dst, false) {
 		return v.cvtDirect(dst)
 	}
-
+	derefType := (*ptrType)(ptr(t)).Type
+	destDerefType := (*ptrType)(ptr(dst)).Type
 	// dst and src are unnamed pointer types with same underlying base type.
 	if destKind == Ptr && !dst.hasName() &&
 		srcKind == Ptr && !t.hasName() &&
-		t.Deref().haveIdenticalUnderlyingType(dst.Deref(), false) {
+		derefType.haveIdenticalUnderlyingType(destDerefType, false) {
 		return v.cvtDirect(dst)
 	}
 

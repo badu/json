@@ -425,14 +425,14 @@ func (ae *allEncoder) encodePtr(e *encodeState, v Value) {
 	// short version of Deref, for reusing value
 	ptrToV := v.Ptr
 	if v.isPointer() {
-		ptrToV = convPtr(ptrToV)
+		ptrToV = *(*ptr)(ptrToV)
 	}
 	// The returned value's address is v's value.
 	if ptrToV == nil {
 		panic("Pointer nil. shouldn't happen! ever!")
 	}
 	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
-	typ := v.Type.Deref()
+	typ := (*ptrType)(ptr(v.Type)).Type
 	v.Type = typ
 	v.Ptr = ptrToV
 	v.Flag = v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
@@ -509,7 +509,7 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 		}
 
 		// empty value and flagged as omitted
-		if fieldValue.isEmptyValue() && curField.willOmit {
+		if isEmptyValue(fieldValue) && curField.willOmit {
 			continue
 		}
 
@@ -617,7 +617,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 	vPointer := v.pointer()
 
 	// prepare map keys
-	typedMap := v.Type.ConvToMap()
+	typedMap := (*mapType)(ptr(v.Type))
 	keyType := typedMap.KeyType
 
 	mapkeyfl := v.ro() | Flag(keyType.Kind())
@@ -642,7 +642,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			typedmemmove(keyType, keyValue, key)
 			mapKeys[i] = Value{keyType, keyValue, mapkeyfl | pointerFlag}
 		} else {
-			mapKeys[i] = Value{keyType, convPtr(key), mapkeyfl}
+			mapKeys[i] = Value{keyType, *(*ptr)(key), mapkeyfl}
 		}
 		mapiternext(it)
 	}
@@ -693,7 +693,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 					daVal.Ptr = mapElemValue
 					daVal.Flag = fl | pointerFlag | key.value.ro()
 				} else {
-					daVal.Ptr = convPtr(elemPtr)
+					daVal.Ptr = *(*ptr)(elemPtr)
 					daVal.Flag = fl | key.value.ro()
 				}
 				ae.encs[0](e, daVal)
@@ -728,28 +728,10 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		var keyName []byte
 
 		switch keyKind {
-		case Int:
-			keyName = FormatInt(int64(*(*int)(key.Ptr)))
-		case Int8:
-			keyName = FormatInt(int64(*(*int8)(key.Ptr)))
-		case Int16:
-			keyName = FormatInt(int64(*(*int16)(key.Ptr)))
-		case Int32:
-			keyName = FormatInt(int64(*(*int32)(key.Ptr)))
-		case Int64:
-			keyName = FormatInt(*(*int64)(key.Ptr))
-		case Uint:
-			keyName = FormatUint(uint64(*(*uint)(key.Ptr)))
-		case Uint8:
-			keyName = FormatUint(uint64(*(*uint8)(key.Ptr)))
-		case Uint16:
-			keyName = FormatUint(uint64(*(*uint16)(key.Ptr)))
-		case Uint32:
-			keyName = FormatUint(uint64(*(*uint32)(key.Ptr)))
-		case Uint64:
-			keyName = FormatUint(*(*uint64)(key.Ptr))
-		case UintPtr:
-			keyName = FormatUint(uint64(*(*uintptr)(key.Ptr)))
+		case Int, Int8, Int16, Int32, Int64:
+			keyName = FormatInt(key.Int())
+		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
+			keyName = FormatUint(key.Uint())
 		case String:
 			keyName = []byte(*(*string)(key.Ptr))
 		}
@@ -774,7 +756,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 				daVal.Ptr = mapElemValue
 				daVal.Flag = fl | pointerFlag | key.ro()
 			} else {
-				daVal.Ptr = convPtr(elemPtr)
+				daVal.Ptr = *(*ptr)(elemPtr)
 				daVal.Flag = fl | key.ro()
 			}
 			ae.encs[0](e, daVal)
@@ -843,7 +825,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 		enc := newStructEncoder(t)
 		return enc.encodeStruct
 	case Map:
-		mapInfo := t.ConvToMap()
+		mapInfo := (*mapType)(ptr(t))
 		switch mapInfo.KeyType.Kind() {
 		case String,
 			Int, Int8, Int16, Int32, Int64,
@@ -855,7 +837,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 		return newMapEncoder(t).encodeMap
 	case Slice:
 		// read the slice element
-		elemType := t.ConvToSlice().ElemType
+		elemType := (*sliceType)(ptr(t)).ElemType
 		// Byte slices get special treatment; arrays don't.
 		if elemType.Kind() == Uint8 {
 			ptrToDeref := elemType.PtrTo()
@@ -878,6 +860,10 @@ func newCondAddrEncoder(elseEnc encoderFunc) *allEncoder {
 	return &allEncoder{encs: encFns{elseEnc}}
 }
 
+func newPtrEncoder(t *RType) *allEncoder {
+	return &allEncoder{encs: encFns{typeEncoder((*ptrType)(ptr(t)).Type)}}
+}
+
 func newStructEncoder(t *RType) *allEncoder {
 	fieldsInfo := getCachedFields(t)
 	se := allEncoder{
@@ -889,7 +875,7 @@ func newStructEncoder(t *RType) *allEncoder {
 		et := t
 		for _, index := range curField.indexes {
 			if et.Kind() == Ptr {
-				et = et.Deref()
+				et = (*ptrType)(ptr(et)).Type
 			}
 			st := (*structType)(ptr(et))
 			field := &st.fields[index]
@@ -908,20 +894,18 @@ func newSliceEncoder(t *RType) *allEncoder {
 func newArrayEncoder(t *RType) *allEncoder {
 	switch t.Kind() {
 	case Array:
-		return &allEncoder{encs: encFns{typeEncoder(t.ConvToArray().ElemType)}, elemType: t.ConvToArray().ElemType}
+		arr := (*arrayType)(ptr(t)) // convert to array
+		return &allEncoder{encs: encFns{typeEncoder(arr.ElemType)}, elemType: arr.ElemType}
 	case Slice:
-		return &allEncoder{encs: encFns{typeEncoder(t.ConvToSlice().ElemType)}, elemType: t.ConvToSlice().ElemType}
+		slc := (*sliceType)(ptr(t))
+		return &allEncoder{encs: encFns{typeEncoder(slc.ElemType)}, elemType: slc.ElemType}
 	default:
 		panic("Not Array, nor Slice")
 	}
 }
 
-func newPtrEncoder(t *RType) *allEncoder {
-	return &allEncoder{encs: encFns{typeEncoder(t.Deref())}}
-}
-
 func newMapEncoder(t *RType) *allEncoder {
-	mapInfo := t.ConvToMap()
+	mapInfo := (*mapType)(ptr(t))
 	return &allEncoder{encs: encFns{typeEncoder(mapInfo.ElemType)}, elemType: mapInfo.ElemType}
 }
 
@@ -997,7 +981,7 @@ func getMarshalFields(t *RType) marshalFields {
 				if embedded {
 					if fieldType.Kind() == Ptr {
 						// Follow pointer.
-						fieldType = fieldType.Deref()
+						fieldType = (*ptrType)(ptr(fieldType)).Type
 					}
 					if isNotExported && fieldType.Kind() != Struct {
 						// Ignore embedded fields of unexported non-struct types.
@@ -1031,7 +1015,7 @@ func getMarshalFields(t *RType) marshalFields {
 
 				if len(fieldType.Name()) == 0 && fieldType.Kind() == Ptr {
 					// Follow pointer.
-					fieldType = fieldType.Deref()
+					fieldType = (*ptrType)(ptr(fieldType)).Type
 				}
 
 				fieldKind := fieldType.Kind()

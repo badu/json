@@ -449,7 +449,7 @@ func indirect(v Value, decodingNull bool) (Value, bool) {
 		}
 
 		if v.IsNil() {
-			v.Set(New(v.Type.Deref()))
+			v.Set(New((*ptrType)(ptr(v.Type)).Type))
 		}
 
 		if v.Type.NumMethod() > 0 {

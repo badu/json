@@ -11,16 +11,57 @@ import (
 	"runtime"
 )
 
-func toIface(t ptr) *ifaceRtype                 { return (*ifaceRtype)(t) }
-func convPtr(p ptr) ptr                         { return *(*ptr)(p) }
 func structFieldOffset(f *structField) uintptr  { return f.offsetEmbed >> 1 }
 func declareReflectName(n name) nameOff         { return addReflectOff(ptr(n.bytes)) } // It returns a new nameOff that can be used to refer to the pointer.
-func loadConvIface(p ptr, x interface{})        { *(*interface{})(p) = x }
-func convIfaceMeth(p ptr) interface{}           { return *(*interface{ M() })(p) }
-func convIface(p ptr) interface{}               { return *(*interface{})(p) }
-func add(p ptr, x uintptr) ptr                  { return ptr(uintptr(p) + x) } // add returns p+x.
+func add(p ptr, x uintptr) ptr                  { return ptr(uintptr(p) + x) }         // add returns p+x.
 func arrayAt(p ptr, i int, eltSize uintptr) ptr { return add(p, uintptr(i)*eltSize) }
 func loadConvPtr(p ptr, x ptr)                  { *(*ptr)(p) = x }
+
+func isEmptyValue(v Value) bool {
+	switch v.Kind() {
+	case Map:
+		return maplen(v.pointer()) == 0
+	case Array:
+		return (*arrayType)(ptr(v.Type)).Len == 0
+	case Slice:
+		return (*sliceHeader)(v.Ptr).Len == 0
+	case String:
+		return (*stringHeader)(v.Ptr).Len == 0
+	case Bool:
+		return !*(*bool)(v.Ptr)
+	case Int:
+		return *(*int)(v.Ptr) == 0
+	case Int8:
+		return *(*int8)(v.Ptr) == 0
+	case Int16:
+		return *(*int16)(v.Ptr) == 0
+	case Int32:
+		return *(*int32)(v.Ptr) == 0
+	case Int64:
+		return *(*int64)(v.Ptr) == 0
+	case Uint:
+		return *(*uint)(v.Ptr) == 0
+	case Uint8:
+		return *(*uint8)(v.Ptr) == 0
+	case Uint16:
+		return *(*uint16)(v.Ptr) == 0
+	case Uint32:
+		return *(*uint32)(v.Ptr) == 0
+	case Uint64:
+		return *(*uint64)(v.Ptr) == 0
+	case UintPtr:
+		return *(*uintptr)(v.Ptr) == 0
+	case Float32:
+		return *(*float32)(v.Ptr) == 0
+	case Float64:
+		return *(*float64)(v.Ptr) == 0
+	case Interface:
+		return *(*ptr)(v.Ptr) == nil
+	case Ptr:
+		return v.IsNil()
+	}
+	return false
+}
 
 func lenExportedMethods(t *RType) int {
 	all, ok := methods(t)

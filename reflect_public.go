@@ -12,7 +12,7 @@ func ReflectOn(i interface{}) Value {
 		return Value{}
 	}
 	// unpackEface converts the empty interface i to a Value.
-	e := toIface(ptr(&i))
+	e := (*ifaceRtype)(ptr(&i))
 	// NOTE: don't read e.word until we know whether it is really a pointer or not.
 	if e.Type == nil {
 		return Value{}
@@ -28,7 +28,7 @@ func ReflectOn(i interface{}) Value {
 // TypeOf returns the reflection Type that represents the dynamic type of i.
 // If i is a nil interface value, TypeOf returns nil.
 func TypeOf(i interface{}) *RType {
-	result := (*toIface(ptr(&i))).Type
+	result := (*(*ifaceRtype)(ptr(&i))).Type
 	if result == nil {
 		return nil
 	}

@@ -296,7 +296,7 @@ func (d *decodeState) literalStore(item []byte, v Value) {
 			return
 		case Slice:
 			stringValue := string(s)
-			if v.Type.ConvToSlice().ElemType.Kind() != Uint8 {
+			if (*sliceType)(ptr(v.Type)).ElemType.Kind() != Uint8 {
 				d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
 				return
 			}
@@ -445,10 +445,11 @@ func (d *decodeState) array(v Value) {
 	// Check type of target.
 	switch v.Kind() {
 	case Array: // valid
-		theLen = int(v.Type.ConvToArray().Len)
-		elemType = v.Type.ConvToArray().ElemType
+		arr := (*arrayType)(ptr(v.Type))
+		theLen = int(arr.Len)
+		elemType = arr.ElemType
 	case Slice: // valid
-		elemType = v.Type.ConvToSlice().ElemType
+		elemType = (*sliceType)(ptr(v.Type)).ElemType
 		slcHeader = (*sliceHeader)(v.Ptr)
 		theLen = slcHeader.Len
 	default:
@@ -543,7 +544,7 @@ func (d *decodeState) array(v Value) {
 func (d *decodeState) doMap(v Value) {
 	// Map key must either have string kind, have an integer kind
 	// Check type of target: `struct` or `map[T1]T2` where `T1` is string, an integer type
-	typedMap := v.Type.ConvToMap()
+	typedMap := (*mapType)(ptr(v.Type))
 	valueTypeKey := typedMap.KeyType
 	switch valueTypeKey.Kind() {
 	case String,
@@ -714,14 +715,15 @@ func (d *decodeState) doStruct(v Value) {
 					if corespValue.IsNil() {
 						// If a struct embeds a pointer to an unexported type, it is not possible to set a newly allocated value since the field is unexported.
 						// See https://golang.org/issue/21357
+						derefType := (*ptrType)(ptr(corespValue.Type)).Type
 						if !corespValue.CanSet() {
-							d.saveError(fmt.Errorf("json: cannot set embedded pointer to unexported struct: %v", corespValue.Type.Deref()))
+							d.saveError(fmt.Errorf("json: cannot set embedded pointer to unexported struct: %v", derefType))
 							// Invalidate corespValue to ensure d.value(corespValue) skips over the JSON value without assigning it to corespValue.
 							corespValue = Value{}
 							isBasic = false
 							break
 						}
-						corespValue.Set(New(corespValue.Type.Deref()))
+						corespValue.Set(New(derefType))
 					}
 					corespValue = corespValue.Deref()
 				}
