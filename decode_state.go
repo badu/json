@@ -252,7 +252,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		//	setting null.
 		switch v.Kind() {
 		case Interface, Ptr, Map, Slice:
-			v.Set(Zero(v.Type))
+			v.SetZero(v.Type)
 			// otherwise, ignore null for primitives/string
 		}
 
@@ -402,7 +402,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 				case Uint32:
 					*(*uint32)(v.Ptr) = uint32(result)
 				case Uint64:
-					*(*uint64)(v.Ptr) = uint64(result)
+					*(*uint64)(v.Ptr) = result
 				case UintPtr:
 					*(*uintptr)(v.Ptr) = uintptr(result)
 				default:
@@ -419,7 +419,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 			}
 
 			if v.CanSet() {
-				*(*float32)(v.Ptr) = float32(n)
+				*(*float32)(v.Ptr) = n
 			}
 
 		case Float64:
@@ -542,13 +542,12 @@ func doArray(d *decodeState, v Value) {
 		switch v.Kind() {
 		case Array:
 			// Array. Zero the rest.
-			zero := Zero(elemType)
 			for ; i < theLen; i++ {
 				Value{
 					Type: elemType,
 					Ptr:  add(v.Ptr, uintptr(i)*elemType.size),
 					Flag: v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind()), // bits same as overall array,
-				}.Set(zero)
+				}.SetZero(elemType)
 			}
 		default:
 			(*sliceHeader)(v.Ptr).Len = i // short version of v.SetLen(i)
@@ -619,7 +618,7 @@ func doMap(d *decodeState, v Value) {
 		}
 
 		if mapElem.IsValid() {
-			mapElem.Set(Zero(typedMap.ElemType))
+			mapElem.SetZero(typedMap.ElemType)
 		}
 		// process it
 		process(d, mapElem)
@@ -781,7 +780,7 @@ func doStruct(d *decodeState, v Value) {
 					// setting null to corespValue
 					switch corespValue.Kind() {
 					case Interface, Ptr, Map, Slice:
-						corespValue.Set(Zero(corespValue.Type))
+						corespValue.SetZero(corespValue.Type)
 						// otherwise, ignore null for primitives/string
 					}
 				case quote: // string

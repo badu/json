@@ -182,7 +182,7 @@ func marshal(e *encodeState, v interface{}) (err error) {
 	return nil
 }
 
-func encodeError(e *encodeState, err error) {
+func encodeError(_ *encodeState, err error) {
 	panic(err)
 }
 
@@ -531,10 +531,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		}
 		sort.Slice(result, func(i, j int) bool {
 			//The result will be -1 if result[i].keyName < result[j].keyName, and +1 if result[i].keyName > result[j].keyName.
-			if bytes.Compare(result[i].keyName, result[j].keyName) == -1 {
-				return true
-			}
-			return false
+			return bytes.Compare(result[i].keyName, result[j].keyName) == -1
 		})
 		// doesn't seem to help much, but we're reusing it anyway
 		daVal := Value{Type: mapElemType}
@@ -575,14 +572,15 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 	e.WriteByte(curlOpen)
 	// checking and setting key kind
 	keyKind := Invalid
-	for _, key := range mapKeys {
+
+	if len(mapKeys) > 0 {
+		key := mapKeys[0]
 		keyKind = key.Kind()
 		switch keyKind {
 		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, String:
 		default:
 			panic("Bad key kind!")
 		}
-		break
 	}
 	// doesn't seem to help much, but we're reusing it anyway
 	daVal := Value{Type: mapElemType}
@@ -1028,10 +1026,7 @@ func getMarshalFields(t *RType) marshalFields {
 		// sort field by name, breaking ties with depth, then breaking ties with "name came from json tag", then breaking ties with index sequence.
 		if !bytes.Equal(x[i].name, x[j].name) {
 			//The result will be -1 if x[i].name < x[j].name, and +1 if x[i].name > x[j].name.
-			if bytes.Compare(x[i].name, x[j].name) == -1 {
-				return true
-			}
-			return false
+			return bytes.Compare(x[i].name, x[j].name) == -1
 		}
 		if len(x[i].indexes) != len(x[j].indexes) {
 			return len(x[i].indexes) < len(x[j].indexes)
@@ -1039,7 +1034,7 @@ func getMarshalFields(t *RType) marshalFields {
 		if x[i].tag != x[j].tag {
 			return x[i].tag
 		}
-		return marshalFields(x).Less(i, j)
+		return x.Less(i, j)
 	})
 
 	// Delete all fields that are hidden by the Go rules for embedded fields, except that fields with JSON tags are promoted.
@@ -1066,7 +1061,7 @@ func getMarshalFields(t *RType) marshalFields {
 	}
 
 	result = out
-	sort.Sort(marshalFields(result))
+	sort.Sort(result)
 
 	return result
 }

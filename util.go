@@ -302,10 +302,7 @@ func equalFoldRight(srcKey, destKey []byte) bool {
 		destKey = destKey[size:]
 
 	}
-	if len(destKey) > 0 {
-		return false
-	}
-	return true
+	return len(destKey) <= 0
 }
 
 // asciiEqualFold is a specialization of bytes.EqualFold for use when s is all ASCII (but may contain non-letters) and contains no special-folding letters.

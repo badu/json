@@ -332,7 +332,7 @@ type (
 )
 
 var (
-	emptyByte = make([]byte, 0, 0)
+	emptyByte = make([]byte, 0)
 	// you won't believe how good this encoder cache is
 	encoderCache sync.Map // map[*RType]encoderFunc
 	fieldsCache  struct {

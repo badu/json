@@ -182,9 +182,6 @@ func (t *RType) haveIdenticalUnderlyingType(dest *RType, cmpTags bool) bool {
 		destArray := (*arrayType)(ptr(dest)) // convert to array
 		srcArray := (*arrayType)(ptr(t))     // convert to array
 		return destArray.Len == srcArray.Len && t.haveIdenticalType(destArray.ElemType, cmpTags)
-	case Func:
-		panic("haveIdenticalUnderlyingType: Comparing Func")
-		return true
 	case Interface:
 		destMethods := dest.ifaceMethods()
 		srcMethods := t.ifaceMethods()
@@ -232,41 +229,6 @@ func (t *RType) haveIdenticalUnderlyingType(dest *RType, cmpTags bool) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func (t *RType) addTypeBits(vec *bitVector, offset uintptr) {
-	switch t.Kind() {
-	case Chan, Func, Map, Ptr, Slice, String, UnsafePointer:
-		// 1 pointer at start of representation
-		for vec.num < uint32(offset/uintptr(PtrSize)) {
-			appendBitVector(vec, 0)
-		}
-		appendBitVector(vec, 1)
-	case Interface:
-		// 2 pointers
-		for vec.num < uint32(offset/uintptr(PtrSize)) {
-			appendBitVector(vec, 0)
-		}
-		appendBitVector(vec, 1)
-		appendBitVector(vec, 1)
-	case Array:
-		// repeat inner type
-		tArray := (*arrayType)(ptr(t)) // convert to array
-		for i := 0; i < int(tArray.Len); i++ {
-			if tArray.ElemType.hasPointers() {
-				tArray.ElemType.addTypeBits(vec, offset+uintptr(i)*tArray.ElemType.size)
-			}
-		}
-	case Struct:
-		// apply fields
-		structType := (*structType)(ptr(t))
-		for i := range structType.fields {
-			field := &structType.fields[i]
-			if field.Type.hasPointers() {
-				field.Type.addTypeBits(vec, offset+structFieldOffset(field))
-			}
-		}
 	}
 }
 
@@ -365,11 +327,7 @@ func (v Value) IsValid() bool       { return v.Flag != 0 }
 func (v Value) isExported() bool    { return v.Flag&exportFlag == 0 }
 func (v Value) IsNil() bool {
 	switch v.Kind() {
-	case Chan, Func, Map, Ptr:
-		if v.hasMethodFlag() {
-			panic("Has method flag while checking isNil.")
-			return false
-		}
+	case Map, Ptr:
 		ptrToV := v.Ptr
 		if v.isPointer() {
 			ptrToV = *(*ptr)(ptrToV)
@@ -536,6 +494,34 @@ func (v Value) Set(toX Value) {
 	} else {
 		loadConvPtr(v.Ptr, toX.Ptr)
 	}
+}
+
+func (v Value) SetZero(typ *RType) {
+	var target ptr
+	if v.Kind() == Interface {
+		target = v.Ptr
+	}
+
+	if typ.isDirectIface() {
+		toX := Value{Type: typ, Ptr: unsafeNew(typ), Flag: Flag(typ.Kind()) | pointerFlag}
+
+		valueAssignTo(&toX, v.Type, target)
+		if toX.isPointer() {
+			typedmemmove(v.Type, v.Ptr, toX.Ptr)
+		} else {
+			loadConvPtr(v.Ptr, toX.Ptr)
+		}
+		return
+	}
+	toX := Value{Type: typ, Ptr: nil, Flag: Flag(typ.Kind())}
+
+	valueAssignTo(&toX, v.Type, target)
+	if toX.isPointer() {
+		typedmemmove(v.Type, v.Ptr, toX.Ptr)
+	} else {
+		loadConvPtr(v.Ptr, toX.Ptr)
+	}
+
 }
 
 func (v Value) setMapIndex(mapType *mapType, key, value Value) {

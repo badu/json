@@ -72,9 +72,6 @@ func lenExportedMethods(t *RType) int {
 	for _, method := range all {
 		methodName := t.nameOffset(method.nameOffset)
 		if methodName.isExported() {
-			if method.typeOffset == 0 {
-				//panic("reflect.x.error : method type is zero. Apply fix.")
-			}
 			count++
 		}
 	}
@@ -193,14 +190,6 @@ func typesByString(target []byte) []*RType {
 		}
 	}
 	return results
-}
-
-func appendBitVector(vec *bitVector, bit uint8) {
-	if vec.num%8 == 0 {
-		vec.data = append(vec.data, 0)
-	}
-	vec.data[vec.num/8] |= bit << (vec.num % 8)
-	vec.num++
 }
 
 // ==============
@@ -409,37 +398,26 @@ func valueConvert(v Value, typ *RType) Value {
 	panic("reflect.Value.Convert: value of type ") // + TypeToString(v.Type) + " cannot be converted to type " + TypeToString(t))
 }
 
+// Note : checking v.Kind() == Interface is caller responsibility
 func valueIface(v Value) Value {
-	switch v.Kind() {
-	case Interface:
-		var eface interface{}
-		if v.Type.NoOfIfaceMethods() == 0 {
-			// the case of "interface{}"
-			eface = *(*interface{})(v.Ptr)
-		} else {
-			eface = *(*interface{ M() })(v.Ptr)
-		}
-		// unpackEface converts the empty interface 'eface' to a Value.
-		e := (*ifaceRtype)(ptr(&eface))
-		// NOTE: don't read e.word until we know whether it is really a pointer or not.
-		if e.Type == nil {
-			panic("Invalid IFACE")
-			// it's invalid
-			return Value{}
-		}
-		f := Flag(e.Type.Kind())
-		if e.Type.isDirectIface() {
-			f |= pointerFlag
-		}
-		x := Value{Type: e.Type, Ptr: e.word, Flag: f}
-		if x.IsValid() {
-			x.Flag |= v.ro()
-		}
-		return x
-	default:
-		panic("Not IFACE.")
-		return v
+	var eface interface{}
+	if v.Type.NoOfIfaceMethods() == 0 {
+		// the case of "interface{}"
+		eface = *(*interface{})(v.Ptr)
+	} else {
+		eface = *(*interface{ M() })(v.Ptr)
 	}
+	// unpackEface converts the empty interface 'eface' to a Value.
+	e := (*ifaceRtype)(ptr(&eface))
+	f := Flag(e.Type.Kind())
+	if e.Type.isDirectIface() {
+		f |= pointerFlag
+	}
+	x := Value{Type: e.Type, Ptr: e.word, Flag: f}
+	if x.IsValid() {
+		x.Flag |= v.ro()
+	}
+	return x
 }
 
 func valueDeref(v Value) Value {

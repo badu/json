@@ -308,12 +308,6 @@ type (
 		bytes *byte
 	}
 
-	// Layout matches runtime.gobitvector (well enough).
-	bitVector struct {
-		num  uint32 // number of bits
-		data []byte
-	}
-
 	// ifaceRtype is the header for an interface{} value.
 	// (COMPILER)
 	ifaceRtype struct {

@@ -540,8 +540,8 @@ func Atof32(src []byte) (f float32, err error) {
 		}
 		// Try another fast path.
 		ext := new(extFloat)
-		if ok := ext.assignDecimal(mantissa, exp, neg, trunc, &float32info); ok {
-			b, ovf := ext.floatBits(&float32info)
+		if ok := assignExtFloatDecimal(ext, mantissa, exp, neg, trunc, &float32info); ok {
+			b, ovf := floatExtBits(ext, &float32info)
 			f = math.Float32frombits(uint32(b))
 			if ovf {
 				err = rangeError(fnParseFloat, src)
@@ -551,10 +551,10 @@ func Atof32(src []byte) (f float32, err error) {
 	}
 
 	var d decimal
-	if !d.set(src) {
+	if !setDecimal(&d, src) {
 		return 0, syntaxError(fnParseFloat, src)
 	}
-	b, ovf := d.floatBits(&float32info)
+	b, ovf := floatDecimalBits(&d, &float32info)
 	f = math.Float32frombits(uint32(b))
 	if ovf {
 		err = rangeError(fnParseFloat, src)
@@ -578,8 +578,8 @@ func Atof64(src []byte) (f float64, err error) {
 		}
 		// Try another fast path.
 		ext := new(extFloat)
-		if ok := ext.assignDecimal(mantissa, exp, neg, trunc, &float64info); ok {
-			b, ovf := ext.floatBits(&float64info)
+		if ok := assignExtFloatDecimal(ext, mantissa, exp, neg, trunc, &float64info); ok {
+			b, ovf := floatExtBits(ext, &float64info)
 			f = math.Float64frombits(b)
 			if ovf {
 				err = rangeError(fnParseFloat, src)
@@ -589,10 +589,10 @@ func Atof64(src []byte) (f float64, err error) {
 	}
 
 	var d decimal
-	if !d.set(src) {
+	if !setDecimal(&d, src) {
 		return 0, syntaxError(fnParseFloat, src)
 	}
-	b, ovf := d.floatBits(&float64info)
+	b, ovf := floatDecimalBits(&d, &float64info)
 	f = math.Float64frombits(b)
 	if ovf {
 		err = rangeError(fnParseFloat, src)
@@ -603,7 +603,7 @@ func Atof64(src []byte) (f float64, err error) {
 func IntParse(src []byte) (i int64, err error) {
 	// Empty string bad.
 	if len(src) == 0 {
-		return 0, syntaxError(fnParseInt, []byte(src))
+		return 0, syntaxError(fnParseInt, src)
 	}
 
 	// Pick off leading sign.
@@ -627,10 +627,10 @@ func IntParse(src []byte) (i int64, err error) {
 
 	cutoff := uint64(1 << uint(64-1))
 	if !neg && un >= cutoff {
-		return int64(cutoff - 1), rangeError(fnParseInt, []byte(s0))
+		return int64(cutoff - 1), rangeError(fnParseInt, s0)
 	}
 	if neg && un > cutoff {
-		return -int64(cutoff), rangeError(fnParseInt, []byte(s0))
+		return -int64(cutoff), rangeError(fnParseInt, s0)
 	}
 	n := int64(un)
 	if neg {
@@ -641,7 +641,7 @@ func IntParse(src []byte) (i int64, err error) {
 
 func UintParse(src []byte) (uint64, error) {
 	if len(src) == 0 {
-		return 0, syntaxError(fnParseUint, []byte(src))
+		return 0, syntaxError(fnParseUint, src)
 	}
 
 	// Cutoff is the smallest number such that cutoff*10> maxUint64.
@@ -649,7 +649,7 @@ func UintParse(src []byte) (uint64, error) {
 	cutoff := uint64(maxUint64/10 + 1)
 
 	var n uint64
-	for _, c := range []byte(src) {
+	for _, c := range src {
 		var d byte
 		switch {
 		case zero <= c && c <= nine:
@@ -1008,9 +1008,9 @@ func shouldRoundUp(a *decimal, nd int) bool {
 
 // frexp10Many applies a common shift by a power of ten to a, b, c.
 func frexp10Many(a, b, c *extFloat) (exp10 int) {
-	exp10, i := c.frexp10()
-	a.multiply(powersOfTen[i])
-	b.multiply(powersOfTen[i])
+	exp10, i := frexp10(c)
+	multiply(a, powersOfTen[i])
+	multiply(b, powersOfTen[i])
 	return
 }
 
@@ -1062,10 +1062,10 @@ func genericFtoa(val float64, fmt byte, bitSize int) []byte {
 
 	// Try Grisu3 algorithm.
 	f := new(extFloat)
-	lower, upper := f.assignComputeBounds(mant, exp, neg, fltInf)
+	lower, upper := assignComputeBounds(f, mant, exp, neg, fltInf)
 	var buf [32]byte
 	digs.d = buf[:]
-	ok = f.shortestDecimal(&digs, &lower, &upper)
+	ok = shortestDecimal(f, &digs, &lower, &upper)
 	if !ok {
 		return bigFtoa(-1, fmt, neg, mant, exp, fltInf)
 	}
@@ -1090,11 +1090,11 @@ func genericFtoa(val float64, fmt byte, bitSize int) []byte {
 // bigFtoa uses multiprecision computations to format a float.
 func bigFtoa(prec int, fmt byte, neg bool, mant uint64, exp int, flt *floatInfo) []byte {
 	d := new(decimal)
-	d.assign(mant)
-	d.shift(exp - int(flt.mantbits))
+	assignDecimal(d, mant)
+	shiftDecimal(d, exp-int(flt.mantbits))
 	var digs decimalSlice
 
-	d.roundShortest(mant, exp, flt)
+	roundDecimalShortest(d, mant, exp, flt)
 	digs = decimalSlice{d: d.d[:], nd: d.nd, dp: d.dp}
 	// Precision for shortest representation mode.
 	switch fmt {
@@ -1116,18 +1116,11 @@ func formatDigits(neg bool, digs decimalSlice, prec int, fmt byte) []byte {
 	case fChr:
 		return fmtF(neg, digs, prec)
 	case gChr:
-		// trailing fractional zeros in 'e' form will be trimmed.
-		eprec := prec
-		if eprec > digs.nd && digs.nd >= digs.dp {
-			eprec = digs.nd
-		}
 		// %e is used if the exponent from the conversion
 		// is less than -4 or greater than or equal to the precision.
 		// if precision was the shortest possible, use precision 6 for this decision.
-		eprec = 6
-
 		exp := digs.dp - 1
-		if exp < -4 || exp >= eprec {
+		if exp < -4 || exp >= 6 {
 			if prec > digs.nd {
 				prec = digs.nd
 			}
@@ -1152,7 +1145,7 @@ func fmtE(neg bool, d decimalSlice, prec int, fmt byte) []byte {
 	}
 
 	// first digit
-	ch := byte(zero)
+	ch := zero
 	if d.nd != 0 {
 		ch = d.d[0]
 	}
@@ -1222,7 +1215,7 @@ func fmtF(neg bool, d decimalSlice, prec int) []byte {
 	if prec > 0 {
 		dst = append(dst, period)
 		for i := 0; i < prec; i++ {
-			ch := byte(zero)
+			ch := zero
 			if j := d.dp + i; 0 <= j && j < d.nd {
 				ch = d.d[j]
 			}
@@ -1331,10 +1324,10 @@ func formatBits(u uint64, neg bool) []byte {
 	return a[i:]
 }
 
-// trim trailing zeros from number.
+// trimDecimal trailing zeros from number.
 // (They are meaningless; the decimal point is tracked
 // independent of the number of digits.)
-func (d *decimal) trim() {
+func trimDecimal(d *decimal) {
 	for d.nd > 0 && d.d[d.nd-1] == zero {
 		d.nd--
 	}
@@ -1344,7 +1337,7 @@ func (d *decimal) trim() {
 }
 
 // Binary shift right (/ 2) by k bits.  k <= maxShift to avoid overflow.
-func (d *decimal) rightShift(k uint) {
+func rightDecimalShift(d *decimal, k uint) {
 	r := 0 // read pointer
 	w := 0 // write pointer
 
@@ -1394,11 +1387,11 @@ func (d *decimal) rightShift(k uint) {
 	}
 
 	d.nd = w
-	d.trim()
+	trimDecimal(d)
 }
 
 // Binary shift left (* 2) by k bits.  k <= maxShift to avoid overflow.
-func (d *decimal) leftShift(k uint) {
+func leftDecimalShift(d *decimal, k uint) {
 	delta := leftCheats[k].delta
 	if prefixIsLessThan(d.d[0:d.nd], leftCheats[k].cutoff) {
 		delta--
@@ -1440,10 +1433,10 @@ func (d *decimal) leftShift(k uint) {
 		d.nd = len(d.d)
 	}
 	d.dp += delta
-	d.trim()
+	trimDecimal(d)
 }
 
-func (d *decimal) set(s []byte) (ok bool) {
+func setDecimal(d *decimal, s []byte) (ok bool) {
 	i := 0
 	d.neg = false
 	d.trunc = false
@@ -1533,7 +1526,7 @@ func (d *decimal) set(s []byte) (ok bool) {
 	return
 }
 
-func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
+func floatDecimalBits(d *decimal, flt *floatInfo) (b uint64, overflow bool) {
 	var exp int
 	var mant uint64
 
@@ -1566,7 +1559,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 		} else {
 			n = powTab[d.dp]
 		}
-		d.shift(-n)
+		shiftDecimal(d, -n)
 		exp += n
 	}
 	for d.dp < 0 || d.dp == 0 && d.d[0] < five {
@@ -1576,7 +1569,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 		} else {
 			n = powTab[-d.dp]
 		}
-		d.shift(n)
+		shiftDecimal(d, n)
 		exp -= n
 	}
 
@@ -1588,7 +1581,7 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 	// adjust d accordingly.
 	if exp < flt.bias+1 {
 		n := flt.bias + 1 - exp
-		d.shift(-n)
+		shiftDecimal(d, -n)
 		exp += n
 	}
 
@@ -1597,8 +1590,8 @@ func (d *decimal) floatBits(flt *floatInfo) (b uint64, overflow bool) {
 	}
 
 	// Extract 1+flt.mantbits bits.
-	d.shift(int(1 + flt.mantbits))
-	mant = d.roundedInteger()
+	shiftDecimal(d, int(1+flt.mantbits))
+	mant = roundedDecimalInteger(d)
 
 	// Rounding might have added a bit; shift down.
 	if mant == 2<<flt.mantbits {
@@ -1632,7 +1625,7 @@ out:
 }
 
 // Assign v to a.
-func (d *decimal) assign(v uint64) {
+func assignDecimal(d *decimal, v uint64) {
 	var buf [24]byte
 
 	// Write reversed decimal in buf.
@@ -1652,26 +1645,26 @@ func (d *decimal) assign(v uint64) {
 		d.nd++
 	}
 	d.dp = d.nd
-	d.trim()
+	trimDecimal(d)
 }
 
 // Binary shift left (k > 0) or right (k < 0).
-func (d *decimal) shift(k int) {
+func shiftDecimal(d *decimal, k int) {
 	switch {
 	case d.nd == 0:
 		// nothing to do: d == 0
 	case k > 0:
 		for k > maxShift {
-			d.leftShift(maxShift)
+			leftDecimalShift(d, maxShift)
 			k -= maxShift
 		}
-		d.leftShift(uint(k))
+		leftDecimalShift(d, uint(k))
 	case k < 0:
 		for k < -maxShift {
-			d.rightShift(maxShift)
+			rightDecimalShift(d, maxShift)
 			k += maxShift
 		}
-		d.rightShift(uint(-k))
+		rightDecimalShift(d, uint(-k))
 	}
 }
 
@@ -1679,28 +1672,28 @@ func (d *decimal) shift(k int) {
 // If nd is zero, it means we're rounding
 // just to the left of the digits, as in
 // 0.09 -> 0.1.
-func (d *decimal) round(nd int) {
+func roundDecimal(d *decimal, nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
 	if shouldRoundUp(d, nd) {
-		d.roundUp(nd)
+		roundDecimalUp(d, nd)
 	} else {
-		d.roundDown(nd)
+		roundDecimalDown(d, nd)
 	}
 }
 
 // Round a down to nd digits (or fewer).
-func (d *decimal) roundDown(nd int) {
+func roundDecimalDown(d *decimal, nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
 	d.nd = nd
-	d.trim()
+	trimDecimal(d)
 }
 
 // Round a up to nd digits (or fewer).
-func (d *decimal) roundUp(nd int) {
+func roundDecimalUp(d *decimal, nd int) {
 	if nd < 0 || nd >= d.nd {
 		return
 	}
@@ -1724,7 +1717,7 @@ func (d *decimal) roundUp(nd int) {
 
 // Extract integer part, rounded appropriately.
 // No guarantees about overflow.
-func (d *decimal) roundedInteger() uint64 {
+func roundedDecimalInteger(d *decimal) uint64 {
 	if d.dp > 20 {
 		return 0xFFFFFFFFFFFFFFFF
 	}
@@ -1742,9 +1735,9 @@ func (d *decimal) roundedInteger() uint64 {
 	return n
 }
 
-// roundShortest rounds d (= mant * 2^exp) to the shortest number of digits
+// roundDecimalShortest rounds d (= mant * 2^exp) to the shortest number of digits
 // that will let the original floating point value be precisely reconstructed.
-func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
+func roundDecimalShortest(d *decimal, mant uint64, exp int, flt *floatInfo) {
 	// If mantissa is zero, the number is zero; stop now.
 	if mant == 0 {
 		d.nd = 0
@@ -1775,8 +1768,8 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 	// Next highest floating point number is mant+1 << exp-mantbits.
 	// Our upper bound is halfway between, mant*2+1 << exp-mantbits-1.
 	upper := new(decimal)
-	upper.assign(mant*2 + 1)
-	upper.shift(exp - int(flt.mantbits) - 1)
+	assignDecimal(upper, mant*2+1)
+	shiftDecimal(upper, exp-int(flt.mantbits)-1)
 
 	// d = mant << (exp - mantbits)
 	// Next lowest floating point number is mant-1 << exp-mantbits,
@@ -1794,8 +1787,8 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 		explo = exp - 1
 	}
 	lower := new(decimal)
-	lower.assign(mantlo*2 + 1)
-	lower.shift(explo - int(flt.mantbits) - 1)
+	assignDecimal(lower, mantlo*2+1)
+	shiftDecimal(lower, explo-int(flt.mantbits)-1)
 
 	// The upper and lower bounds are possible outputs only if
 	// the original mantissa is even, so that IEEE round-to-even
@@ -1805,12 +1798,12 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 	// Now we can figure out the minimum number of digits required.
 	// Walk along until d has distinguished itself from upper and lower.
 	for i := 0; i < d.nd; i++ {
-		l := byte(zero) // lower digit
+		l := zero // lower digit
 		if i < lower.nd {
 			l = lower.d[i]
 		}
-		m := d.d[i]     // middle digit
-		u := byte(zero) // upper digit
+		m := d.d[i] // middle digit
+		u := zero   // upper digit
 		if i < upper.nd {
 			u = upper.d[i]
 		}
@@ -1828,63 +1821,23 @@ func (d *decimal) roundShortest(mant uint64, exp int, flt *floatInfo) {
 		// If it's okay to do only one, do it.
 		switch {
 		case okdown && okup:
-			d.round(i + 1)
+			roundDecimal(d, i+1)
 			return
 		case okdown:
-			d.roundDown(i + 1)
+			roundDecimalDown(d, i+1)
 			return
 		case okup:
-			d.roundUp(i + 1)
+			roundDecimalUp(d, i+1)
 			return
 		}
 	}
-}
-
-// adjustLastDigitFixed assumes d contains the representation of the integral part
-// of some number, whose fractional part is num / (den << shift). The numerator
-// num is only known up to an uncertainty of size ε, assumed to be less than
-// (den << shift)/2.
-//
-// It will increase the last digit by one to account for correct rounding, typically
-// when the fractional part is greater than 1/2, and will return false if ε is such
-// that no correct answer can be given.
-func (d *decimalSlice) adjustLastDigitFixed(num, den uint64, shift uint, ε uint64) bool {
-	if num > den<<shift {
-		panic("strconv: num > den<<shift in adjustLastDigitFixed")
-	}
-	if 2*ε > den<<shift {
-		panic("strconv: ε > (den<<shift)/2")
-	}
-	if 2*(num+ε) < den<<shift {
-		return true
-	}
-	if 2*(num-ε) > den<<shift {
-		// increment d by 1.
-		i := d.nd - 1
-		for ; i >= 0; i-- {
-			if d.d[i] == nine {
-				d.nd--
-			} else {
-				break
-			}
-		}
-		if i < 0 {
-			d.d[0] = one
-			d.nd = 1
-			d.dp++
-		} else {
-			d.d[i]++
-		}
-		return true
-	}
-	return false
 }
 
 // adjustLastDigit modifies d = x-currentDiff*ε, to get closest to
 // d = x-targetDiff*ε, without becoming smaller than x-maxDiff*ε.
 // It assumes that a decimal digit is worth ulpDecimal*ε, and that
 // all data is known with an error estimate of ulpBinary*ε.
-func (d *decimalSlice) adjustLastDigit(currentDiff, targetDiff, maxDiff, ulpDecimal, ulpBinary uint64) bool {
+func adjustLastDigit(d *decimalSlice, currentDiff, targetDiff, maxDiff, ulpDecimal, ulpBinary uint64) bool {
 	if ulpDecimal < 2*ulpBinary {
 		// Approximation is too wide.
 		return false
@@ -1913,11 +1866,11 @@ func (e *NumError) Error() string {
 	return e.Func + ": " + "parsing `" + e.Num + "`: " + e.Err.Error()
 }
 
-// floatBits returns the bits of the float64 that best approximates
+// floatExtBits returns the bits of the float64 that best approximates
 // the extFloat passed as receiver. Overflow is set to true if
 // the resulting float64 is ±Inf.
-func (f *extFloat) floatBits(flt *floatInfo) (bits uint64, overflow bool) {
-	f.normalize()
+func floatExtBits(f *extFloat, flt *floatInfo) (bits uint64, overflow bool) {
+	normalize(f)
 
 	exp := f.exp + 63
 
@@ -1932,7 +1885,7 @@ func (f *extFloat) floatBits(flt *floatInfo) (bits uint64, overflow bool) {
 	mant := f.mant >> (63 - flt.mantbits)
 	if f.mant&(1<<(62-flt.mantbits)) != 0 {
 		// Round up.
-		mant += 1
+		mant++
 	}
 
 	// Rounding might have added a bit; shift down.
@@ -1964,7 +1917,7 @@ func (f *extFloat) floatBits(flt *floatInfo) (bits uint64, overflow bool) {
 // defined by mant, exp and precision given by flt. It returns
 // lower, upper such that any number in the closed interval
 // [lower, upper] is converted back to the same floating point number.
-func (f *extFloat) assignComputeBounds(mant uint64, exp int, neg bool, flt *floatInfo) (lower, upper extFloat) {
+func assignComputeBounds(f *extFloat, mant uint64, exp int, neg bool, flt *floatInfo) (lower, upper extFloat) {
 	f.mant = mant
 	f.exp = exp - int(flt.mantbits)
 	f.neg = neg
@@ -1987,7 +1940,7 @@ func (f *extFloat) assignComputeBounds(mant uint64, exp int, neg bool, flt *floa
 
 // Normalize normalizes f so that the highest bit of the mantissa is
 // set, and returns the number by which the mantissa was left-shifted.
-func (f *extFloat) normalize() (shift uint) {
+func normalize(f *extFloat) (shift uint) {
 	mant, exp := f.mant, f.exp
 	if mant == 0 {
 		return 0
@@ -2014,7 +1967,7 @@ func (f *extFloat) normalize() (shift uint) {
 	}
 	if mant>>(64-1) == 0 {
 		mant <<= 1
-		exp -= 1
+		exp--
 	}
 	shift = uint(f.exp - exp)
 	f.mant, f.exp = mant, exp
@@ -2023,7 +1976,7 @@ func (f *extFloat) normalize() (shift uint) {
 
 // Multiply sets f to the product f*g: the result is correctly rounded,
 // but not normalized.
-func (f *extFloat) multiply(g extFloat) {
+func multiply(f *extFloat, g extFloat) {
 	fhi, flo := f.mant>>32, uint64(uint32(f.mant))
 	ghi, glo := g.mant>>32, uint64(uint32(g.mant))
 
@@ -2045,13 +1998,13 @@ func (f *extFloat) multiply(g extFloat) {
 // reports whether the value represented by f is guaranteed to be the
 // best approximation of d after being rounded to a float64 or
 // float32 depending on flt.
-func (f *extFloat) assignDecimal(mantissa uint64, exp10 int, neg bool, trunc bool, flt *floatInfo) (ok bool) {
+func assignExtFloatDecimal(f *extFloat, mantissa uint64, exp10 int, neg bool, trunc bool, flt *floatInfo) (ok bool) {
 	const uint64digits = 19
 	const errorscale = 8
-	errors := 0 // An upper bound for error, computed in errorscale*ulp.
+	numErr := 0 // An upper bound for error, computed in errorscale*ulp.
 	if trunc {
 		// the decimal number was truncated.
-		errors += errorscale / 2
+		numErr += errorscale / 2
 	}
 
 	f.mant = mantissa
@@ -2069,23 +2022,23 @@ func (f *extFloat) assignDecimal(mantissa uint64, exp10 int, neg bool, trunc boo
 	if adjExp < uint64digits && mantissa < uint64pow10[uint64digits-adjExp] {
 		// We can multiply the mantissa exactly.
 		f.mant *= uint64pow10[adjExp]
-		f.normalize()
+		normalize(f)
 	} else {
-		f.normalize()
-		f.multiply(smallPowersOfTen[adjExp])
-		errors += errorscale / 2
+		normalize(f)
+		multiply(f, smallPowersOfTen[adjExp])
+		numErr += errorscale / 2
 	}
 
 	// We multiply by 10 to the exp - exp%step.
-	f.multiply(powersOfTen[i])
-	if errors > 0 {
-		errors += 1
+	multiply(f, powersOfTen[i])
+	if numErr > 0 {
+		numErr++
 	}
-	errors += errorscale / 2
+	numErr += errorscale / 2
 
 	// Normalize
-	shift := f.normalize()
-	errors <<= shift
+	shift := normalize(f)
+	numErr <<= shift
 
 	// Now f is a good approximation of the decimal.
 	// Check whether the error is too large: that is, if the mantissa
@@ -2108,8 +2061,8 @@ func (f *extFloat) assignDecimal(mantissa uint64, exp10 int, neg bool, trunc boo
 	// Do a signed comparison here! If the error estimate could make
 	// the mantissa round differently for the conversion to double,
 	// then we can't give a definite answer.
-	if int64(halfway)-int64(errors) < int64(mantExtra) &&
-		int64(mantExtra) < int64(halfway)+int64(errors) {
+	if int64(halfway)-int64(numErr) < int64(mantExtra) &&
+		int64(mantExtra) < int64(halfway)+int64(numErr) {
 		return false
 	}
 	return true
@@ -2119,7 +2072,7 @@ func (f *extFloat) assignDecimal(mantissa uint64, exp10 int, neg bool, trunc boo
 // f by an approximate power of ten 10^-exp, and returns exp10, so
 // that f*10^exp10 has the same value as the old f, up to an ulp,
 // as well as the index of 10^-exp in the powersOfTen table.
-func (f *extFloat) frexp10() (exp10, index int) {
+func frexp10(f *extFloat) (exp10, index int) {
 	// The constants expMin and expMax constrain the final value of the
 	// binary exponent of f. We want a small integral part in the result
 	// because finding digits of an integer requires divisions, whereas
@@ -2145,7 +2098,7 @@ Loop:
 	}
 	// Apply the desired decimal shift on f. It will have exponent
 	// in the desired range. This is multiplication by 10^-exp10.
-	f.multiply(powersOfTen[i])
+	multiply(f, powersOfTen[i])
 
 	return -(firstPowerOfTen + i*stepPowerOfTen), i
 }
@@ -2154,7 +2107,7 @@ Loop:
 // which belongs to the open interval (lower, upper), where f is supposed
 // to lie. It returns false whenever the result is unsure. The implementation
 // uses the Grisu3 algorithm.
-func (f *extFloat) shortestDecimal(d *decimalSlice, lower, upper *extFloat) bool {
+func shortestDecimal(f *extFloat, d *decimalSlice, lower, upper *extFloat) bool {
 	if f.mant == 0 {
 		d.nd = 0
 		d.dp = 0
@@ -2186,7 +2139,7 @@ func (f *extFloat) shortestDecimal(d *decimalSlice, lower, upper *extFloat) bool
 		d.neg = f.neg
 		return true
 	}
-	upper.normalize()
+	normalize(upper)
 	// Uniformize exponents.
 	if f.exp > upper.exp {
 		f.mant <<= uint(f.exp - upper.exp)
@@ -2234,7 +2187,7 @@ func (f *extFloat) shortestDecimal(d *decimalSlice, lower, upper *extFloat) bool
 			d.neg = f.neg
 			// Sometimes allowance is so large the last digit might need to be
 			// decremented to get closer to f.
-			return d.adjustLastDigit(currentDiff, targetDiff, allowance, pow<<shift, 2)
+			return adjustLastDigit(d, currentDiff, targetDiff, allowance, pow<<shift, 2)
 		}
 	}
 	d.nd = integerDigits
@@ -2256,7 +2209,7 @@ func (f *extFloat) shortestDecimal(d *decimalSlice, lower, upper *extFloat) bool
 			// We are in the admissible range. Note that if allowance is about to
 			// overflow, that is, allowance > 2^64/10, the condition is automatically
 			// true due to the limited range of fraction.
-			return d.adjustLastDigit(
+			return adjustLastDigit(d,
 				fraction, targetDiff*multiplier, allowance*multiplier,
 				1<<shift, multiplier*2)
 		}
