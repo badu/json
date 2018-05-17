@@ -12,10 +12,10 @@ import (
 )
 
 // UseNumber causes the Decoder to unmarshal a number into an interface{} as a Number instead of as a float64.
-func (d *Decoder) UseNumber() { d.state.useNumber = true }
+func (d *Decoder) UseNumber() { d.state.opts.useNumber = true }
 
 // UseStrict causes the Decoder to return an error when the destination is a struct and the input contains object keys which do not match any non-ignored, exported fields in the destination.
-func (d *Decoder) UseStrict() { d.state.useStrict = true }
+func (d *Decoder) UseStrict() { d.state.opts.useStrict = true }
 
 // Decode reads the next JSON-encoded value from its input and stores it in the value pointed to by v.
 // See the documentation for Unmarshal for details about the conversion of JSON into a Go value.

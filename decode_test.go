@@ -825,10 +825,10 @@ func TestUnmarshal(t *testing.T) {
 		}
 		if !reflect.DeepEqual(v.Elem().Interface(), tt.out) {
 			t.Errorf("#%d: mismatch\nhave: %#+v\nwant: %#+v", i, v.Elem().Interface(), tt.out)
-			data, _ := Marshal(v.Elem().Interface())
-			println(string(data))
-			data, _ = Marshal(tt.out)
-			println(string(data))
+			//data, _ := Marshal(v.Elem().Interface())
+			//println(string(data))
+			//data, _ = Marshal(tt.out)
+			//println(string(data))
 			continue
 		}
 

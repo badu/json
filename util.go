@@ -95,13 +95,7 @@ func decodeUxxxx(target []byte) rune {
 }
 
 // unquote converts a isBasic JSON string literal s into an actual string t.
-// The rules are different than for Go, so cannot use strconv.Unquote.
-func unquote(s []byte) (string, bool) {
-	s, ok := unquoteBytes(s)
-	return string(s), ok
-}
-
-// TODO : maybe this could be "inserted" in Request, so we move faster ?
+// The rules are different than for Go, so cannot use strconv_small.Unquote.
 func unquoteBytes(target []byte) ([]byte, bool) {
 	// if target is too small or we don't have it surrounded with quotes
 	if len(target) < 2 || target[0] != quote || target[len(target)-1] != quote {
@@ -130,7 +124,7 @@ func unquoteBytes(target []byte) ([]byte, bool) {
 	if usualCharsLen == len(target) {
 		return target, true
 	}
-	// TODO : find a better len calculus. Maybe we can also have a pool of bytes?
+
 	result := make([]byte, len(target)+2*utf8.UTFMax)
 	// copy the "normal" chars found
 	copyLen := copy(result, target[0:usualCharsLen])
@@ -157,11 +151,11 @@ func unquoteBytes(target []byte) ([]byte, bool) {
 				usualCharsLen++
 				copyLen++
 			case bChr:
-				result[copyLen] = '\b'
+				result[copyLen] = slashB
 				usualCharsLen++
 				copyLen++
 			case fChr:
-				result[copyLen] = '\f'
+				result[copyLen] = slashF
 				usualCharsLen++
 				copyLen++
 			case nChr:

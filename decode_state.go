@@ -20,18 +20,18 @@ func decodeError(d *decodeState, err error) {
 
 // saveError saves the first err it is called with, for reporting at the end of the unmarshal.
 func saveError(d *decodeState, err error) {
-	if d.savedError == nil {
-		d.savedError = addErrorContext(d, err)
+	if d.opts.savedError == nil {
+		d.opts.savedError = addErrorContext(d, err)
 	}
 }
 
 // addErrorContext returns a new error enhanced with information from d.errorContext
 func addErrorContext(d *decodeState, err error) error {
-	if len(d.errorContext.Field) > 0 {
+	if len(d.opts.errorContext.Field) > 0 {
 		switch err := err.(type) {
 		case *UnmarshalTypeError:
-			err.Struct = d.errorContext.Type.Name()
-			err.Field = string(d.errorContext.Field)
+			err.Struct = d.opts.errorContext.Type.Name()
+			err.Field = string(d.opts.errorContext.Field)
 			return err
 		}
 	}
@@ -41,7 +41,7 @@ func addErrorContext(d *decodeState, err error) error {
 func initState(d *decodeState, data []byte) *decodeState {
 	d.data = data
 	d.offset = 0
-	d.savedError = nil
+	d.opts.savedError = nil
 	return d
 }
 
@@ -130,7 +130,7 @@ func unmarshal(d *decodeState, v interface{}) (err error) {
 
 	// We decode value not value.Deref because the Unmarshaler interface test must be applied at the top level of the value.
 	process(d, value)
-	return d.savedError
+	return d.opts.savedError
 }
 
 func callUnmarshaller(d *decodeState, value Value, item []byte) {
@@ -303,20 +303,20 @@ func literalStore(d *decodeState, item []byte, v Value) {
 			}
 			*(*[]byte)(v.Ptr) = b[:n]
 		case String:
-			s, ok := unquote(item)
+			s, ok := unquoteBytes(item)
 			if !ok {
 				decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 				return
 			}
-			*(*string)(v.Ptr) = s
+			*(*string)(v.Ptr) = *(*string)(ptr(&s)) // string := s []byte -> string
 		case Interface:
 			if v.NumMethod() == 0 {
-				s, ok := unquote(item)
+				s, ok := unquoteBytes(item)
 				if !ok {
 					decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 					return
 				}
-				v.Set(ReflectOn(s))
+				v.Set(ReflectOn(string(s)))
 			} else {
 				saveError(d, &UnmarshalTypeError{Value: "string", Type: v.Type, Offset: int64(d.offset)})
 				return
@@ -346,7 +346,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 				return
 			}
 		case Interface:
-			n, err := convertNumber(item, d.useNumber)
+			n, err := convertNumber(item, d.opts.useNumber)
 			if err != nil {
 				saveError(d, &UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
 				return
@@ -752,10 +752,10 @@ func doStruct(d *decodeState, v Value) {
 
 				corespValue = corespValue.getField(idx)
 			}
-			d.errorContext.Field = curField.name
-			d.errorContext.Type = v.Type
+			d.opts.errorContext.Field = curField.name
+			d.opts.errorContext.Type = v.Type
 
-		} else if d.useStrict {
+		} else if d.opts.useStrict {
 			saveError(d, errors.New("json: unknown field "+string(fieldName)))
 		}
 
@@ -784,11 +784,11 @@ func doStruct(d *decodeState, v Value) {
 						// otherwise, ignore null for primitives/string
 					}
 				case quote: // string
-					s, ok := unquote(item)
+					s, ok := unquoteBytes(item)
 					if !ok {
 						decodeError(d, errPhase)
 					}
-					literalStore(d, []byte(s), corespValue)
+					literalStore(d, s, corespValue)
 
 				default: // number
 					saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into "+corespValue.Type.String()))
@@ -807,7 +807,7 @@ func doStruct(d *decodeState, v Value) {
 			decodeError(d, errPhase)
 		}
 
-		d.errorContext.Field = emptyByte
+		d.opts.errorContext.Field = emptyByte
 	}
 }
 
@@ -872,7 +872,7 @@ func objectInterface(d *decodeState) map[string]interface{} {
 		start := d.offset - 1
 		op = scanWhile(d, scanContinue)
 		item := d.data[start : d.offset-1]
-		key, ok := unquote(item)
+		key, ok := unquoteBytes(item)
 		if !ok {
 			decodeError(d, errPhase)
 		}
@@ -885,8 +885,8 @@ func objectInterface(d *decodeState) map[string]interface{} {
 			decodeError(d, errPhase)
 		}
 
-		// Read value.
-		m[key] = valueInterface(d)
+		// Read value. *(*string)(ptr(&key)) means transforming key []byte -> string
+		m[*(*string)(ptr(&key))] = valueInterface(d)
 
 		// Next token must be , or }.
 		op = scanWhile(d, scanSkipSpace)
@@ -919,11 +919,11 @@ func literalInterface(d *decodeState) interface{} {
 		return c == tChr
 
 	case quote: // string
-		s, ok := unquote(item)
+		s, ok := unquoteBytes(item)
 		if !ok {
 			decodeError(d, errPhase)
 		}
-		return s
+		return *(*string)(ptr(&s)) // return s []byte -> string
 
 	default: // number
 		if c != minus && (c < zero || c > nine) {
@@ -931,7 +931,7 @@ func literalInterface(d *decodeState) interface{} {
 		}
 
 		// convertNumber converts the number literal s to a float64 or a Number depending on the setting of d.useNumber.
-		if d.useNumber {
+		if d.opts.useNumber {
 			return Number(string(item))
 		}
 

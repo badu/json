@@ -36,6 +36,8 @@ const (
 	tab         byte = '\t'
 	newLine     byte = '\n'
 	retChar     byte = '\r'
+	slashB      byte = '\b'
+	slashF      byte = '\f'
 	space       byte = ' '
 	quote       byte = '"'
 	sQuote      byte = '\''
@@ -193,11 +195,15 @@ type (
 
 	// decodeState represents the state while decoding a JSON value
 	decodeState struct {
-		scan         scanner
-		nextScan     scanner // for calls to nextValue
+		scan     scanner
+		nextScan scanner // for calls to nextValue
+		data     []byte
+		offset   int // provides context for type errors , read offset in data
+		opts     decOpts
+	}
+
+	decOpts struct {
 		errorContext errorContext
-		data         []byte
-		offset       int // provides context for type errors , read offset in data
 		savedError   error
 		useNumber    bool
 		useStrict    bool // don't allow the input to contains object keys which do not match any non-ignored, exported fields in the destination.
