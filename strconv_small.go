@@ -32,17 +32,6 @@ const (
 
 	nSmalls = 100
 
-	smallsString = "00010203040506070809" +
-		"10111213141516171819" +
-		"20212223242526272829" +
-		"30313233343536373839" +
-		"40414243444546474849" +
-		"50515253545556575859" +
-		"60616263646566676869" +
-		"70717273747576777879" +
-		"80818283848586878889" +
-		"90919293949596979899"
-
 	host32bit = ^uint(0)>>32 == 0
 )
 
@@ -92,6 +81,17 @@ type (
 )
 
 var (
+	smallsString = []byte(
+		"00010203040506070809" +
+			"10111213141516171819" +
+			"20212223242526272829" +
+			"30313233343536373839" +
+			"40414243444546474849" +
+			"50515253545556575859" +
+			"60616263646566676869" +
+			"70717273747576777879" +
+			"80818283848586878889" +
+			"90919293949596979899")
 	NaN           = []byte("NaN")
 	MinusInf      = []byte("-Inf")
 	PlusInf       = []byte("+Inf")
@@ -402,7 +402,7 @@ func UnquoteChar(s []byte, quoter byte) (value rune, multibyte bool, tail []byte
 			v = v<<4 | x
 		}
 		s = s[n:]
-		if c == 'x' {
+		if c == xChr {
 			// single-byte string, possibly not UTF-8
 			value = v
 			break
@@ -1245,7 +1245,7 @@ func small(i int) []byte {
 	if i < 10 {
 		off = 1
 	}
-	return []byte(smallsString[i*2+off : i*2+2])
+	return smallsString[i*2+off : i*2+2]
 }
 
 // formatBits computes the string representation of u in base 10.

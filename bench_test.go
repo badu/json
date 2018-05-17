@@ -34,11 +34,10 @@ type (
 )
 
 var (
-	codeJSON   []byte
 	codeStruct codeResponse
 )
 
-func codeInit() {
+func codeInit() []byte {
 	f, err := os.Open("testdata/code.json.gz")
 	if err != nil {
 		panic(err)
@@ -53,7 +52,7 @@ func codeInit() {
 		panic(err)
 	}
 
-	codeJSON = data
+	codeJSON := data
 
 	if err := Unmarshal(codeJSON, &codeStruct); err != nil {
 		panic("unmarshal code.json: " + err.Error())
@@ -75,9 +74,11 @@ func codeInit() {
 		}
 		panic("re-marshal code.json: different result")
 	}
+
+	return codeJSON
 }
 
-func oldCodeInit() {
+func oldCodeInit() []byte {
 	f, err := os.Open("testdata/code.json.gz")
 	if err != nil {
 		panic(err)
@@ -92,7 +93,7 @@ func oldCodeInit() {
 		panic(err)
 	}
 
-	codeJSON = data
+	codeJSON := data
 
 	if err := json.Unmarshal(codeJSON, &codeStruct); err != nil {
 		panic("unmarshal code.json: " + err.Error())
@@ -114,14 +115,16 @@ func oldCodeInit() {
 		}
 		panic("re-marshal code.json: different result")
 	}
+	return codeJSON
 }
 
 func BenchmarkCodeEncoder(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		codeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := codeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		enc := NewEncoder(ioutil.Discard)
 		for pb.Next() {
@@ -134,11 +137,12 @@ func BenchmarkCodeEncoder(b *testing.B) {
 }
 
 func BenchmarkOldCodeEncoder(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		oldCodeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := oldCodeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		enc := json.NewEncoder(ioutil.Discard)
 		for pb.Next() {
@@ -151,11 +155,12 @@ func BenchmarkOldCodeEncoder(b *testing.B) {
 }
 
 func BenchmarkCodeMarshal(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		codeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := codeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if _, err := Marshal(&codeStruct); err != nil {
@@ -167,11 +172,12 @@ func BenchmarkCodeMarshal(b *testing.B) {
 }
 
 func BenchmarkOldCodeMarshal(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		oldCodeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := oldCodeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if _, err := json.Marshal(&codeStruct); err != nil {
@@ -183,11 +189,12 @@ func BenchmarkOldCodeMarshal(b *testing.B) {
 }
 
 func BenchmarkCodeDecoder(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		codeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := codeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		var buf Buffer
 		dec := NewDecoder(&buf)
@@ -207,11 +214,12 @@ func BenchmarkCodeDecoder(b *testing.B) {
 }
 
 func BenchmarkOldCodeDecoder(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		oldCodeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := oldCodeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		var buf Buffer
 		dec := json.NewDecoder(&buf)
@@ -237,6 +245,7 @@ func BenchmarkUnicodeDecoder(b *testing.B) {
 	dec := NewDecoder(r)
 	var out string
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if err := dec.Decode(&out); err != nil {
 			b.Fatal("Decode:", err)
@@ -252,6 +261,7 @@ func BenchmarkOldUnicodeDecoder(b *testing.B) {
 	dec := json.NewDecoder(r)
 	var out string
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if err := dec.Decode(&out); err != nil {
 			b.Fatal("Decode:", err)
@@ -271,6 +281,7 @@ func BenchmarkDecoderStream(b *testing.B) {
 	}
 	ones := strings.Repeat(" 1\n", 300000) + "\n\n\n"
 	b.StartTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if i%300000 == 0 {
 			buf.WriteString(ones)
@@ -293,6 +304,7 @@ func BenchmarkOldDecoderStream(b *testing.B) {
 	}
 	ones := strings.Repeat(" 1\n", 300000) + "\n\n\n"
 	b.StartTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if i%300000 == 0 {
 			buf.WriteString(ones)
@@ -305,11 +317,12 @@ func BenchmarkOldDecoderStream(b *testing.B) {
 }
 
 func BenchmarkCodeUnmarshal(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		codeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := codeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			var r codeResponse
@@ -322,11 +335,12 @@ func BenchmarkCodeUnmarshal(b *testing.B) {
 }
 
 func BenchmarkOldCodeUnmarshal(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		oldCodeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := oldCodeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			var r codeResponse
@@ -339,11 +353,12 @@ func BenchmarkOldCodeUnmarshal(b *testing.B) {
 }
 
 func BenchmarkCodeUnmarshalReuse(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		codeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := codeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		var r codeResponse
 		for pb.Next() {
@@ -355,11 +370,12 @@ func BenchmarkCodeUnmarshalReuse(b *testing.B) {
 }
 
 func BenchmarkOldCodeUnmarshalReuse(b *testing.B) {
-	if codeJSON == nil {
-		b.StopTimer()
-		oldCodeInit()
-		b.StartTimer()
-	}
+
+	b.StopTimer()
+	codeJSON := oldCodeInit()
+	b.StartTimer()
+
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		var r codeResponse
 		for pb.Next() {
@@ -371,6 +387,7 @@ func BenchmarkOldCodeUnmarshalReuse(b *testing.B) {
 }
 
 func BenchmarkUnmarshalString(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`"hello, world"`)
 	b.RunParallel(func(pb *testing.PB) {
 		var s string
@@ -383,6 +400,7 @@ func BenchmarkUnmarshalString(b *testing.B) {
 }
 
 func BenchmarkOldUnmarshalString(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`"hello, world"`)
 	b.RunParallel(func(pb *testing.PB) {
 		var s string
@@ -395,6 +413,7 @@ func BenchmarkOldUnmarshalString(b *testing.B) {
 }
 
 func BenchmarkUnmarshalFloat64(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`3.14`)
 	b.RunParallel(func(pb *testing.PB) {
 		var f float64
@@ -407,6 +426,7 @@ func BenchmarkUnmarshalFloat64(b *testing.B) {
 }
 
 func BenchmarkOldUnmarshalFloat64(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`3.14`)
 	b.RunParallel(func(pb *testing.PB) {
 		var f float64
@@ -419,6 +439,7 @@ func BenchmarkOldUnmarshalFloat64(b *testing.B) {
 }
 
 func BenchmarkUnmarshalInt64(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`3`)
 	b.RunParallel(func(pb *testing.PB) {
 		var x int64
@@ -431,6 +452,7 @@ func BenchmarkUnmarshalInt64(b *testing.B) {
 }
 
 func BenchmarkOldUnmarshalInt64(b *testing.B) {
+	b.ReportAllocs()
 	data := []byte(`3`)
 	b.RunParallel(func(pb *testing.PB) {
 		var x int64

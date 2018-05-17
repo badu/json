@@ -16,6 +16,7 @@ func declareReflectName(n name) nameOff         { return addReflectOff(ptr(n.byt
 func add(p ptr, x uintptr) ptr                  { return ptr(uintptr(p) + x) }         // add returns p+x.
 func arrayAt(p ptr, i int, eltSize uintptr) ptr { return add(p, uintptr(i)*eltSize) }
 func loadConvPtr(p ptr, x ptr)                  { *(*ptr)(p) = x }
+func noOfIfaceMethods(t *RType) int             { return len((*ifaceType)(ptr(t)).methods) }
 
 func isEmptyValue(v Value) bool {
 	switch v.Kind() {
@@ -201,7 +202,7 @@ func internalNew(t *RType) Value {
 
 // makeInt returns a Value of type t equal to bits (possibly truncated),
 // where t is a signed or unsigned int type.
-func makeInt(f Flag, v uint64, t *RType) Value {
+func makeInt(v uint64, t *RType) Value {
 	ptr := unsafeNew(t)
 	switch t.size {
 	case 1:
@@ -213,12 +214,12 @@ func makeInt(f Flag, v uint64, t *RType) Value {
 	case 8:
 		*(*uint64)(ptr) = v
 	}
-	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+	return Value{Type: t, Ptr: ptr, Flag: pointerFlag | Flag(t.Kind())}
 }
 
 // makeFloat returns a Value of type t equal to v (possibly truncated to float32),
 // where t is a float32 or float64 type.
-func makeFloat(f Flag, v float64, t *RType) Value {
+func makeFloat(v float64, t *RType) Value {
 	ptr := unsafeNew(t)
 	switch t.size {
 	case 4:
@@ -226,12 +227,12 @@ func makeFloat(f Flag, v float64, t *RType) Value {
 	case 8:
 		*(*float64)(ptr) = v
 	}
-	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+	return Value{Type: t, Ptr: ptr, Flag: pointerFlag | Flag(t.Kind())}
 }
 
 // makeComplex returns a Value of type t equal to v (possibly truncated to complex64),
 // where t is a complex64 or complex128 type.
-func makeComplex(f Flag, v complex128, t *RType) Value {
+func makeComplex(v complex128, t *RType) Value {
 	ptr := unsafeNew(t)
 	switch t.size {
 	case 8:
@@ -239,27 +240,27 @@ func makeComplex(f Flag, v complex128, t *RType) Value {
 	case 16:
 		*(*complex128)(ptr) = v
 	}
-	return Value{Type: t, Ptr: ptr, Flag: f | pointerFlag | Flag(t.Kind())}
+	return Value{Type: t, Ptr: ptr, Flag: pointerFlag | Flag(t.Kind())}
 }
 
-func makeString(f Flag, s string, t *RType) Value {
+func makeString(s string, t *RType) Value {
 	ret := internalNew(t)
 	*(*string)(ret.Ptr) = s
-	ret.Flag = ret.Flag&^addressableFlag | f
+	ret.Flag = ret.Flag &^ addressableFlag
 	return ret
 }
 
-func makeBytes(f Flag, byt []byte, t *RType) Value {
+func makeBytes(byt []byte, t *RType) Value {
 	ret := internalNew(t)
 	*(*[]byte)(ret.Ptr) = byt
-	ret.Flag = ret.Flag&^addressableFlag | f
+	ret.Flag = ret.Flag &^ addressableFlag
 	return ret
 }
 
-func makeRunes(f Flag, run []rune, t *RType) Value {
+func makeRunes(run []rune, t *RType) Value {
 	ret := internalNew(t)
 	*(*[]rune)(ret.Ptr) = run
-	ret.Flag = ret.Flag&^addressableFlag | f
+	ret.Flag = ret.Flag &^ addressableFlag
 	return ret
 }
 
@@ -274,13 +275,13 @@ func cvtDirect(v Value, typ *RType) Value {
 		ptr = c
 		f &^= addressableFlag
 	}
-	return Value{Type: typ, Ptr: ptr, Flag: v.ro() | f}
+	return Value{Type: typ, Ptr: ptr, Flag: f}
 }
 
 func assertE2I(v Value, dst *RType, target ptr) {
 	// TODO : @badu - Type links to methods
 	//to be read "if NumMethod(dst) == 0{"
-	if (dst.Kind() == Interface && dst.NoOfIfaceMethods() == 0) || (dst.Kind() != Interface && lenExportedMethods(dst) == 0) {
+	if (dst.Kind() == Interface && noOfIfaceMethods(dst) == 0) || (dst.Kind() != Interface && lenExportedMethods(dst) == 0) {
 		// the case of "interface{}"
 		*(*interface{})(target) = v.valueInterface()
 	} else {
@@ -292,14 +293,14 @@ func assertE2I(v Value, dst *RType, target ptr) {
 func cvtT2I(v Value, typ *RType) Value {
 	target := unsafeNew(typ)
 	assertE2I(v, typ, target)
-	return Value{Type: typ, Ptr: target, Flag: v.ro() | pointerFlag | Flag(Interface)}
+	return Value{Type: typ, Ptr: target, Flag: pointerFlag | Flag(Interface)}
 }
 
 // convert operation: interface -> interface
 func cvtI2I(v Value, typ *RType) Value {
 	if v.IsNil() {
 		ret := Zero(typ)
-		ret.Flag |= v.ro()
+		//ret.Flag |= v.ro()
 		return ret
 	}
 	switch v.Kind() {
@@ -313,10 +314,6 @@ func cvtI2I(v Value, typ *RType) Value {
 }
 
 func valueConvert(v Value, typ *RType) Value {
-	if v.hasMethodFlag() {
-		panic("Value.Convert : This is a method.")
-		//v = v.makeMethodValue()
-	}
 	destKind := typ.Kind()
 	srcKind := v.Type.Kind()
 
@@ -324,43 +321,43 @@ func valueConvert(v Value, typ *RType) Value {
 	case Int, Int8, Int16, Int32, Int64:
 		switch destKind {
 		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return makeInt(v.ro(), uint64(v.Int()), typ) // convert operation: intXX -> [u]intXX
+			return makeInt(uint64(v.Int()), typ) // convert operation: intXX -> [u]intXX
 		case Float32, Float64:
-			return makeFloat(v.ro(), float64(v.Int()), typ) // convert operation: intXX -> floatXX
+			return makeFloat(float64(v.Int()), typ) // convert operation: intXX -> floatXX
 		case String:
-			return makeString(v.ro(), string(v.Int()), typ) // convert operation: intXX -> string
+			return makeString(string(v.Int()), typ) // convert operation: intXX -> string
 		}
 	case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
 		switch destKind {
 		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return makeInt(v.ro(), v.Uint(), typ) // convert operation: uintXX -> [u]intXX
+			return makeInt(v.Uint(), typ) // convert operation: uintXX -> [u]intXX
 		case Float32, Float64:
-			return makeFloat(v.ro(), float64(v.Uint()), typ) // convert operation: uintXX -> floatXX
+			return makeFloat(float64(v.Uint()), typ) // convert operation: uintXX -> floatXX
 		case String:
-			return makeString(v.ro(), string(v.Uint()), typ) // convert operation: uintXX -> string
+			return makeString(string(v.Uint()), typ) // convert operation: uintXX -> string
 		}
 	case Float32, Float64:
 		switch destKind {
 		case Int, Int8, Int16, Int32, Int64:
-			return makeInt(v.ro(), uint64(int64(v.Float())), typ) // convert operation: floatXX -> intXX
+			return makeInt(uint64(int64(v.Float())), typ) // convert operation: floatXX -> intXX
 		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			return makeInt(v.ro(), uint64(v.Float()), typ) // convert operation: floatXX -> uintXX
+			return makeInt(uint64(v.Float()), typ) // convert operation: floatXX -> uintXX
 		case Float32, Float64:
-			return makeFloat(v.ro(), v.Float(), typ) // convert operation: floatXX -> floatXX
+			return makeFloat(v.Float(), typ) // convert operation: floatXX -> floatXX
 		}
 	case Complex64, Complex128:
 		switch destKind {
 		case Complex64, Complex128:
-			return makeComplex(v.ro(), v.Complex(), typ) // convert operation: complexXX -> complexXX
+			return makeComplex(v.Complex(), typ) // convert operation: complexXX -> complexXX
 		}
 	case String:
 		sliceElem := (*sliceType)(ptr(typ)).ElemType
 		if destKind == Slice && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
-				return makeBytes(v.ro(), []byte(*(*string)(v.Ptr)), typ) // convert operation: string -> []byte
+				return makeBytes([]byte(*(*string)(v.Ptr)), typ) // convert operation: string -> []byte
 			case Int32:
-				return makeRunes(v.ro(), []rune(*(*string)(v.Ptr)), typ) // convert operation: string -> []rune
+				return makeRunes([]rune(*(*string)(v.Ptr)), typ) // convert operation: string -> []rune
 			}
 		}
 	case Slice:
@@ -368,9 +365,9 @@ func valueConvert(v Value, typ *RType) Value {
 		if destKind == String && sliceElem.pkgPathLen() == 0 {
 			switch sliceElem.Kind() {
 			case Uint8:
-				return makeString(v.ro(), string(*(*[]byte)(v.Ptr)), typ) // convert operation: []byte -> string
+				return makeString(string(*(*[]byte)(v.Ptr)), typ) // convert operation: []byte -> string
 			case Int32:
-				return makeString(v.ro(), string(*(*[]rune)(v.Ptr)), typ) // // convert operation: []rune -> string
+				return makeString(string(*(*[]rune)(v.Ptr)), typ) // // convert operation: []rune -> string
 			}
 		}
 	}
@@ -401,7 +398,7 @@ func valueConvert(v Value, typ *RType) Value {
 // Note : checking v.Kind() == Interface is caller responsibility
 func valueIface(v Value) Value {
 	var eface interface{}
-	if v.Type.NoOfIfaceMethods() == 0 {
+	if noOfIfaceMethods(v.Type) == 0 {
 		// the case of "interface{}"
 		eface = *(*interface{})(v.Ptr)
 	} else {
@@ -413,11 +410,7 @@ func valueIface(v Value) Value {
 	if e.Type.isDirectIface() {
 		f |= pointerFlag
 	}
-	x := Value{Type: e.Type, Ptr: e.word, Flag: f}
-	if x.IsValid() {
-		x.Flag |= v.ro()
-	}
-	return x
+	return Value{Type: e.Type, Ptr: e.word, Flag: f}
 }
 
 func valueDeref(v Value) Value {
@@ -431,29 +424,21 @@ func valueDeref(v Value) Value {
 	}
 	// if we got here, there is not a dereference, nor the pointer is nil - studying the type's pointer
 	typ := (*ptrType)(ptr(v.Type)).Type
-	fl := v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())
-	return Value{Type: typ, Ptr: ptrToV, Flag: fl}
+	return Value{Type: typ, Ptr: ptrToV, Flag: v.Flag&exportFlag | pointerFlag | addressableFlag | Flag(typ.Kind())}
 }
 
 func valueAssignTo(v *Value, dst *RType, target ptr) {
-	if v.hasMethodFlag() {
-		//v = v.makeMethodValue()
-		panic("Value.assignTo : This is a method.")
-	}
-
 	switch {
 	default:
-		// TODO : shouldn't we fail first?
 		// Failed.
 		panic("reflect.Value.assignTo: value of type ") // + TypeToString(v.Type) + " is not assignable to type " + TypeToString(dst))
 
 	case v.Type.directlyAssignable(dst):
 		// Overwrite type so that they match. Same memory layout, so no harm done.
-		fl := v.Flag&(addressableFlag|pointerFlag) | v.ro()
+		fl := v.Flag & (addressableFlag | pointerFlag)
 		fl |= Flag(dst.Kind())
 		v.Type = dst
 		v.Flag = fl
-		//return Value{Type: dst, Ptr: v.Ptr, Flag: fl}
 
 	case v.Type.implements(dst):
 		if target == nil {
@@ -466,13 +451,11 @@ func valueAssignTo(v *Value, dst *RType, target ptr) {
 			v.Ptr = nil
 			v.Flag = Flag(Interface)
 			return
-			//return Value{Type: dst, Ptr: nil, Flag: Flag(Interface)}
 		}
 		assertE2I(*v, dst, target)
 		v.Type = dst
 		v.Ptr = target
 		v.Flag = pointerFlag | Flag(Interface)
-		//return Value{Type: dst, Ptr: target, Flag: pointerFlag | Flag(Interface)}
 	}
 }
 

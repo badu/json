@@ -512,13 +512,13 @@ func doArray(d *decodeState, v Value) {
 				process(d, Value{
 					Type: elemType,
 					Ptr:  arrayAt(slcHeader.Data, i, elemType.size),
-					Flag: addressableFlag | pointerFlag | v.ro() | Flag(elemType.Kind()),
+					Flag: addressableFlag | pointerFlag | Flag(elemType.Kind()),
 				})
 			} else {
 				process(d, Value{
 					Type: elemType,
 					Ptr:  add(v.Ptr, uintptr(i)*elemType.size),
-					Flag: v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind()), // bits same as overall array,
+					Flag: v.Flag&(pointerFlag|addressableFlag) | Flag(elemType.Kind()), // bits same as overall array,
 				})
 			}
 		} else {
@@ -546,7 +546,7 @@ func doArray(d *decodeState, v Value) {
 				Value{
 					Type: elemType,
 					Ptr:  add(v.Ptr, uintptr(i)*elemType.size),
-					Flag: v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(elemType.Kind()), // bits same as overall array,
+					Flag: v.Flag&(pointerFlag|addressableFlag) | Flag(elemType.Kind()), // bits same as overall array,
 				}.SetZero(elemType)
 			}
 		default:
@@ -949,7 +949,7 @@ func literalInterface(d *decodeState) interface{} {
 func indirect(v Value, decodingNull bool) (Value, bool) {
 	// If v is a named type and is addressable, start with its address, so that if the type has pointer methods, we find them.
 	if v.Kind() != Ptr && v.Type.hasName() && v.CanAddr() {
-		v = Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
+		v = Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: Flag(Ptr)}
 	}
 	for {
 		// Load value from interface, but only if the result will be

@@ -56,7 +56,7 @@ func (n name) name() []byte {
 	info := (*[4]byte)(ptr(n.bytes))
 	nameLen := n.nameLen()
 	result := make([]byte, nameLen)
-	header := (*sliceHeader)(ptr(&result))
+	header := (*stringHeader)(ptr(&result))
 	header.Data = ptr(&info[3])
 	header.Len = nameLen
 	return result
@@ -69,7 +69,7 @@ func (n name) tag() []byte {
 	}
 	nameLen := n.nameLen()
 	result := make([]byte, tagLen)
-	header := (*sliceHeader)(ptr(&result))
+	header := (*stringHeader)(ptr(&result))
 	header.Data = ptr(n.data(5 + nameLen))
 	header.Len = tagLen
 	return result

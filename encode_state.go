@@ -212,7 +212,7 @@ func marshalerEncoder(e *encodeState, v Value) {
 }
 
 func addrMarshalerEncoder(e *encodeState, v Value) {
-	va := Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: v.ro() | Flag(Ptr)}
+	va := Value{Type: v.Type.PtrTo(), Ptr: v.Ptr, Flag: Flag(Ptr)}
 	if va.IsNil() {
 		e.Write(nullLiteral)
 		return
@@ -438,7 +438,7 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 		arrType := (*arrayType)(ptr(v.Type)) // convert to array
 		arrElemType = arrType.ElemType
 		arrLen = int(arrType.Len)
-		fl = v.Flag&(pointerFlag|addressableFlag) | v.ro() | Flag(arrType.Kind())
+		fl = v.Flag&(pointerFlag|addressableFlag) | Flag(arrType.Kind())
 	case Slice:
 		// slices can be empty
 		if v.IsNil() {
@@ -449,7 +449,7 @@ func (ae *allEncoder) encodeArray(e *encodeState, v Value) {
 		arrElemType = (*sliceType)(ptr(v.Type)).ElemType
 		slcHeader = (*sliceHeader)(v.Ptr)
 		arrLen = slcHeader.Len
-		fl = addressableFlag | pointerFlag | v.ro() | Flag(arrElemType.Kind())
+		fl = addressableFlag | pointerFlag | Flag(arrElemType.Kind())
 	}
 	// Mark Array Start
 	e.WriteByte(squareOpen)
@@ -480,150 +480,168 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		e.Write(nullLiteral)
 		return
 	}
-
-	mapElemType := (*mapType)(ptr(v.Type)).ElemType
-	// prepare easy access
-	fl := v.ro() | Flag(mapElemType.Kind())
-	vPointer := v.pointer()
-
-	// prepare map keys
-	typedMap := (*mapType)(ptr(v.Type))
-	keyType := typedMap.KeyType
-
-	mapkeyfl := v.ro() | Flag(keyType.Kind())
-
+	// getting map length
 	mapPtr := v.pointer()
-	mapLen := int(0)
+	mapLen := 0
 	if mapPtr != nil {
 		mapLen = maplen(mapPtr)
 	}
-
+	// fail fast for no allocation
+	if mapLen == 0 {
+		e.WriteBytes(curlOpen, curlClose)
+		return
+	}
+	// prepare map keys
+	typedMap := (*mapType)(ptr(v.Type))
+	// iterating over map keys
 	it := mapiterinit(v.Type, mapPtr)
-	mapKeys := make([]Value, mapLen)
-	for i := 0; i < len(mapKeys); i++ {
+
+	mapKeys := make([]KeyValuePair, mapLen)
+	for i := 0; i < mapLen; i++ {
 		key := mapiterkey(it)
 		if key == nil {
 			// Someone deleted an entry from the map since we called maplen above. It's a data race, but nothing we can do about it.
 			break
 		}
-		if keyType.isDirectIface() {
+
+		var isPointer bool
+		var keyPointer ptr
+
+		if typedMap.KeyType.isDirectIface() {
 			// Copy result so future changes to the map won't change the underlying value.
-			keyValue := unsafeNew(keyType)
-			typedmemmove(keyType, keyValue, key)
-			mapKeys[i] = Value{keyType, keyValue, mapkeyfl | pointerFlag}
+			keyPointer = unsafeNew(typedMap.KeyType)
+			typedmemmove(typedMap.KeyType, keyPointer, key)
+			isPointer = true
 		} else {
-			mapKeys[i] = Value{keyType, *(*ptr)(key), mapkeyfl}
+			// by default we're taking the pointer (which means it's not a pointer to pointer)
+			keyPointer = *(*ptr)(key)
 		}
+
+		// taking only the required info, ignoring the rest
+		switch typedMap.KeyType.Kind() {
+		case String:
+			header := (*stringHeader)(ptr(keyPointer))
+			var b []byte
+			byteHeader := (*sliceHeader)(ptr(&b))
+			byteHeader.Data = header.Data
+			byteHeader.Len = header.Len
+			byteHeader.Cap = header.Len
+			mapKeys[i] = KeyValuePair{
+				keyName:   b, //[]byte(*(*string)(keyPointer)),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Int:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatInt(int64(*(*int)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Int8:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatInt(int64(*(*int8)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Int16:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatInt(int64(*(*int16)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Int32:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatInt(int64(*(*int32)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Int64:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatInt(*(*int64)(keyPointer)),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Uint:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(uint64(*(*uint)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Uint8:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(uint64(*(*uint8)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Uint16:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(uint64(*(*uint16)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Uint32:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(uint64(*(*uint32)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case Uint64:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(*(*uint64)(keyPointer)),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		case UintPtr:
+			mapKeys[i] = KeyValuePair{
+				keyName:   FormatUint(uint64(*(*uintptr)(keyPointer))),
+				isPointer: isPointer,
+				ptr:       keyPointer,
+			}
+		default:
+			panic("Bad key kind!")
+		}
+
 		mapiternext(it)
 	}
 
 	// new feature : optional sorting for map keys (default false)
 	if e.opts.willSortMapKeys {
-		// Mark Map Start
-		e.WriteByte(curlOpen)
-
-		// TODO : maybe use preparation above in the same operation (instead of iterating twice)
-		result := make([]KeyValuePair, len(mapKeys))
-
-		for idx, key := range mapKeys {
-			result[idx].value = key
-			if err := resolveKey(&result[idx]); err != nil {
-				//error(&MarshalerError{key.Type(), err})
-				panic("Error : " + err.Error() + " on " + key.Type.Name())
-			}
-		}
-		sort.Slice(result, func(i, j int) bool {
+		sort.Slice(mapKeys, func(i, j int) bool {
 			//The result will be -1 if result[i].keyName < result[j].keyName, and +1 if result[i].keyName > result[j].keyName.
-			return bytes.Compare(result[i].keyName, result[j].keyName) == -1
+			return bytes.Compare(mapKeys[i].keyName, mapKeys[j].keyName) == -1
 		})
-		// doesn't seem to help much, but we're reusing it anyway
-		elemVal := Value{Type: mapElemType, Flag: fl}
-		isDirectIface := mapElemType.isDirectIface()
-		if isDirectIface {
-			elemVal.Flag = fl | pointerFlag
-		}
-		for j, key := range result {
-			if j > 0 {
-				e.WriteByte(comma)
-			}
-			writeBytes(e, key.keyName)
-			e.WriteByte(colon)
-
-			var keyPtr ptr
-			if key.value.isPointer() {
-				keyPtr = key.value.Ptr
-			} else {
-				keyPtr = ptr(&key.value.Ptr)
-			}
-			elemPtr := mapaccess(v.Type, vPointer, keyPtr)
-			if isDirectIface {
-				// Copy result so future changes to the map won't change the underlying value.
-				mapElemValue := unsafeNew(mapElemType)
-				typedmemmove(mapElemType, mapElemValue, elemPtr)
-				elemVal.Ptr = mapElemValue
-			} else {
-				elemVal.Ptr = *(*ptr)(elemPtr)
-			}
-
-			ae.encs[0](e, elemVal)
-		}
-
-		// Mark Map End
-		e.WriteByte(curlClose)
-		return
 	}
 
 	// Mark Map Start
 	e.WriteByte(curlOpen)
-	// checking and setting key kind
-	keyKind := Invalid
 
-	if len(mapKeys) > 0 {
-		key := mapKeys[0]
-		keyKind = key.Kind()
-		switch keyKind {
-		case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, String:
-		default:
-			panic("Bad key kind!")
-		}
-	}
 	// doesn't seem to help much, but we're reusing it anyway
-	elemVal := Value{Type: mapElemType, Flag: fl}
-	isDirectIface := mapElemType.isDirectIface()
-	if isDirectIface {
-		elemVal.Flag = fl | pointerFlag
+	elemVal := Value{Type: typedMap.ElemType, Flag: Flag(typedMap.ElemType.Kind())}
+
+	if typedMap.ElemType.isDirectIface() {
+		elemVal.Flag = elemVal.Flag | pointerFlag
 	}
+
 	// default, unsorted map keys
 	for i, key := range mapKeys {
-		var keyName []byte
-
-		switch keyKind {
-		case Int, Int8, Int16, Int32, Int64:
-			keyName = FormatInt(key.Int())
-		case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-			keyName = FormatUint(key.Uint())
-		case String:
-			keyName = []byte(*(*string)(key.Ptr))
-		}
-
 		if i > 0 {
 			e.WriteByte(comma)
 		}
-		writeBytes(e, keyName)
+		writeBytes(e, key.keyName)
 		e.WriteByte(colon)
 
 		var keyPtr ptr
-		if key.isPointer() {
-			keyPtr = key.Ptr
+		if key.isPointer {
+			keyPtr = key.ptr
 		} else {
-			keyPtr = ptr(&key.Ptr)
+			keyPtr = ptr(&key.ptr)
 		}
 
-		elemPtr := mapaccess(v.Type, vPointer, keyPtr)
-		if isDirectIface {
+		elemPtr := mapaccess(v.Type, mapPtr, keyPtr)
+		if typedMap.ElemType.isDirectIface() {
 			// Copy result so future changes to the map won't change the underlying value.
-			mapElemValue := unsafeNew(mapElemType)
-			typedmemmove(mapElemType, mapElemValue, elemPtr)
+			mapElemValue := unsafeNew(typedMap.ElemType)
+			typedmemmove(typedMap.ElemType, mapElemValue, elemPtr)
 			elemVal.Ptr = mapElemValue
 		} else {
 			elemVal.Ptr = *(*ptr)(elemPtr)

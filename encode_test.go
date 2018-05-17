@@ -1237,5 +1237,5 @@ func TestNewNull(t *testing.T) {
 	if string(result) != expect {
 		t.Errorf(" got\n%s\nwant\n%s", string(result), expect)
 	}
-	t.Logf("Result : %s", string(result))
+	//t.Logf("Result : %s", string(result))
 }

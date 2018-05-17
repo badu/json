@@ -165,8 +165,8 @@ func Unmarshal(data []byte, target interface{}) error {
 // JSON cannot represent cyclic data structures and Marshal does not handle them. Passing cyclic structures to Marshal will result in an infinite recursion.
 //
 func Marshal(v interface{}) ([]byte, error) {
-	e := encodeState{opts: encOpts{escapeHTML: true}}
-	err := marshal(&e, v)
+	e := &encodeState{opts: encOpts{escapeHTML: true}}
+	err := marshal(e, v)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +175,8 @@ func Marshal(v interface{}) ([]byte, error) {
 
 // Same as Marshal, but sets the flag to sort map keys while serializing
 func MarshalWithSortMap(v interface{}) ([]byte, error) {
-	e := encodeState{opts: encOpts{escapeHTML: true, willSortMapKeys: true}}
-	err := marshal(&e, v)
+	e := &encodeState{opts: encOpts{escapeHTML: true, willSortMapKeys: true}}
+	err := marshal(e, v)
 	if err != nil {
 		return nil, err
 	}

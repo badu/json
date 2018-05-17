@@ -58,6 +58,7 @@ const (
 	zChr        byte = 'z'
 	iChr        byte = 'i'
 	gChr        byte = 'g'
+	xChr        byte = 'x'
 	bigFChr     byte = 'F'
 	bigAChr     byte = 'A'
 	bigZChr     byte = 'Z'
@@ -306,8 +307,9 @@ type (
 	For this reason, sorting map keys is optional and default false.
 	*/
 	KeyValuePair struct {
-		value   Value
-		keyName []byte
+		ptr       ptr
+		isPointer bool
+		keyName   []byte
 	}
 
 	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.

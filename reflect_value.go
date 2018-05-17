@@ -11,18 +11,15 @@ import (
 	"math"
 )
 
-func (t *RType) hasPointers() bool                { return t.kind&kindNoPointers == 0 }
-func (t *RType) isDirectIface() bool              { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
-func (t *RType) Kind() Kind                       { return Kind(t.kind & kindMask) }
-func (t *RType) hasExtraStar() bool               { return t.extraTypeFlag&hasExtraStarFlag != 0 }
-func (t *RType) nameOffset(offset nameOff) name   { return name{(*byte)(resolveNameOff(ptr(t), offset))} }
-func (t *RType) nameOffsetStr() name              { return name{(*byte)(resolveNameOff(ptr(t), t.str))} }
-func (t *RType) typeOffset(offset typeOff) *RType { return (*RType)(resolveTypeOff(ptr(t), offset)) }
-func (t *RType) hasInfoFlag() bool                { return t.extraTypeFlag&hasExtraInfoFlag != 0 }
-func (t *RType) NoOfIfaceMethods() int            { return len((*ifaceType)(ptr(t)).methods) }
-func (t *RType) ifaceMethods() []ifaceMethod      { return (*ifaceType)(ptr(t)).methods }
-func (t *RType) isAnon() bool                     { return t.extraTypeFlag&hasNameFlag == 0 }
-func (t *RType) hasName() bool                    { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
+func (t *RType) hasPointers() bool              { return t.kind&kindNoPointers == 0 }
+func (t *RType) isDirectIface() bool            { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
+func (t *RType) hasExtraStar() bool             { return t.extraTypeFlag&hasExtraStarFlag != 0 }
+func (t *RType) hasInfoFlag() bool              { return t.extraTypeFlag&hasExtraInfoFlag != 0 }
+func (t *RType) isAnon() bool                   { return t.extraTypeFlag&hasNameFlag == 0 }
+func (t *RType) hasName() bool                  { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
+func (t *RType) Kind() Kind                     { return Kind(t.kind & kindMask) }
+func (t *RType) nameOffset(offset nameOff) name { return name{(*byte)(resolveNameOff(ptr(t), offset))} }
+func (t *RType) nameOffsetStr() name            { return name{(*byte)(resolveNameOff(ptr(t), t.str))} }
 
 func (t *RType) pkg() (int32, bool) {
 	if !t.hasInfoFlag() {
@@ -50,7 +47,7 @@ func (t *RType) pkg() (int32, bool) {
 
 func (t *RType) PtrTo() *RType {
 	if t.ptrToThis != 0 {
-		return t.typeOffset(t.ptrToThis)
+		return (*RType)(resolveTypeOff(ptr(t), t.ptrToThis))
 	}
 
 	// Look in known types.
@@ -183,8 +180,8 @@ func (t *RType) haveIdenticalUnderlyingType(dest *RType, cmpTags bool) bool {
 		srcArray := (*arrayType)(ptr(t))     // convert to array
 		return destArray.Len == srcArray.Len && t.haveIdenticalType(destArray.ElemType, cmpTags)
 	case Interface:
-		destMethods := dest.ifaceMethods()
-		srcMethods := t.ifaceMethods()
+		destMethods := (*ifaceType)(ptr(dest)).methods
+		srcMethods := (*ifaceType)(ptr(t)).methods
 		// the case of "interface{}"
 		if len(destMethods) == 0 && len(srcMethods) == 0 {
 			return true
@@ -259,7 +256,7 @@ func (t *RType) implements(dest *RType) bool {
 			srcMethod := &srcIntf.methods[j]
 			srcMethodName := t.nameOffset(srcMethod.nameOffset)
 			if bytes.Equal(srcMethodName.name(), destMethodName.name()) &&
-				t.typeOffset(srcMethod.typeOffset) == destIntf.typeOffset(destMethod.typeOffset) {
+				(*RType)(resolveTypeOff(ptr(t), srcMethod.typeOffset)) == (*RType)(resolveTypeOff(ptr(destIntf), destMethod.typeOffset)) {
 				if !destMethodName.isExported() {
 					destPkgPath := destMethodName.pkgPath()
 					if len(destPkgPath) == 0 {
@@ -297,7 +294,7 @@ func (t *RType) implements(dest *RType) bool {
 		srcMethod := vmethods[j]
 		srcMethodName := t.nameOffset(srcMethod.nameOffset)
 		if bytes.Equal(srcMethodName.name(), destMethodName.name()) &&
-			t.typeOffset(srcMethod.typeOffset) == destIntf.typeOffset(destMethod.typeOffset) {
+			(*RType)(resolveTypeOff(ptr(t), srcMethod.typeOffset)) == (*RType)(resolveTypeOff(ptr(destIntf), destMethod.typeOffset)) {
 			if !destMethodName.isExported() {
 				destPkgPath := destMethodName.pkgPath()
 				if len(destPkgPath) == 0 {
@@ -319,12 +316,11 @@ func (t *RType) implements(dest *RType) bool {
 	return false
 }
 
-func (v Value) CanAddr() bool       { return v.Flag&addressableFlag != 0 }
-func (v Value) hasMethodFlag() bool { return v.Flag&methodFlag != 0 }
-func (v Value) isPointer() bool     { return v.Flag&pointerFlag != 0 }
-func (v Value) Kind() Kind          { return Kind(v.Flag & kindMaskFlag) }
-func (v Value) IsValid() bool       { return v.Flag != 0 }
-func (v Value) isExported() bool    { return v.Flag&exportFlag == 0 }
+func (v Value) Kind() Kind       { return Kind(v.Flag & kindMaskFlag) }
+func (v Value) CanAddr() bool    { return v.Flag&addressableFlag != 0 }
+func (v Value) isPointer() bool  { return v.Flag&pointerFlag != 0 }
+func (v Value) IsValid() bool    { return v.Flag != 0 }
+func (v Value) isExported() bool { return v.Flag&exportFlag == 0 }
 func (v Value) IsNil() bool {
 	switch v.Kind() {
 	case Map, Ptr:
@@ -360,16 +356,10 @@ func (v Value) ro() Flag {
 }
 
 func (v Value) valueInterface() interface{} {
-	if v.hasMethodFlag() {
-		panic("hasMethodFlag.")
-		// TODO : Value must be func kind
-		//return v.makeMethodValue().packEface()
-	}
-
 	if v.Kind() == Interface {
 		// Special case: return the element inside the interface.
 		// Empty interface has one layout, all interfaces with methods have a second layout.
-		if v.Type.NoOfIfaceMethods() == 0 {
+		if noOfIfaceMethods(v.Type) == 0 {
 			// the case of "interface{}"
 			return *(*interface{})(v.Ptr)
 		}
@@ -552,7 +542,6 @@ func (v Value) OverflowUint(x uint64) bool {
 		return x != trunc
 	}
 	panic("Overflow Uint")
-	//return x != (x<<(64-v.Type.size))>>(64-v.Type.size)
 }
 
 func (v Value) OverflowInt(x int64) bool {
@@ -564,7 +553,6 @@ func (v Value) OverflowInt(x int64) bool {
 		return x != trunc
 	}
 	panic("Overflow Int")
-	//return x != (x<<(64-v.Type.size))>>(64-v.Type.size)
 }
 
 func (v Value) OverflowFloat(x float64) bool {
@@ -582,9 +570,8 @@ func (v Value) OverflowFloat(x float64) bool {
 }
 
 func (v Value) NumMethod() int {
-	// we're sure that it is a struct : check is performed in ToStruct()
 	if v.Type.Kind() == Interface {
-		return v.Type.NoOfIfaceMethods()
+		return noOfIfaceMethods(v.Type)
 	}
 
 	return lenExportedMethods(v.Type)
@@ -592,7 +579,7 @@ func (v Value) NumMethod() int {
 
 func (t *RType) NumMethod() int {
 	if t.Kind() == Interface {
-		return t.NoOfIfaceMethods()
+		return noOfIfaceMethods(t)
 	}
 
 	return lenExportedMethods(t)

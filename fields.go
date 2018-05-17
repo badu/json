@@ -61,36 +61,3 @@ func (n Number) Float64() (float64, error) {
 func (n Number) Int64() (int64, error) {
 	return IntParse([]byte(n))
 }
-
-func resolveKey(w *KeyValuePair) error {
-	switch w.value.Kind() {
-	case String:
-		w.keyName = []byte(*(*string)(w.value.Ptr))
-	case Int:
-		w.keyName = FormatInt(int64(*(*int)(w.value.Ptr)))
-	case Int8:
-		w.keyName = FormatInt(int64(*(*int8)(w.value.Ptr)))
-	case Int16:
-		w.keyName = FormatInt(int64(*(*int16)(w.value.Ptr)))
-	case Int32:
-		w.keyName = FormatInt(int64(*(*int32)(w.value.Ptr)))
-	case Int64:
-		w.keyName = FormatInt(*(*int64)(w.value.Ptr))
-	case Uint:
-		w.keyName = FormatUint(uint64(*(*uint)(w.value.Ptr)))
-	case Uint8:
-		w.keyName = FormatUint(uint64(*(*uint8)(w.value.Ptr)))
-	case Uint16:
-		w.keyName = FormatUint(uint64(*(*uint16)(w.value.Ptr)))
-	case Uint32:
-		w.keyName = FormatUint(uint64(*(*uint32)(w.value.Ptr)))
-	case Uint64:
-		w.keyName = FormatUint(*(*uint64)(w.value.Ptr))
-	case UintPtr:
-		w.keyName = FormatUint(uint64(*(*uintptr)(w.value.Ptr)))
-
-	default:
-		panic("unexpected map key type")
-	}
-	return nil
-}
