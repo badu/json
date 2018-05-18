@@ -240,7 +240,7 @@ func stateInString(s *scanner, c byte) int {
 	return scanContinue
 }
 
-// stateInStringEsc is the state after reading `"\` during a isBasic string.
+// stateInStringEsc is the state after reading `"\` during a isStringer string.
 func stateInStringEsc(s *scanner, c byte) int {
 	switch c {
 	case bChr, fChr, nChr, rChr, tChr, backSlash, slash, quote:
@@ -253,7 +253,7 @@ func stateInStringEsc(s *scanner, c byte) int {
 	return makeScanError(s, c, "in string escape code")
 }
 
-// stateInStringEscU is the state after reading `"\u` during a isBasic string.
+// stateInStringEscU is the state after reading `"\u` during a isStringer string.
 func stateInStringEscU(s *scanner, c byte) int {
 	if zero <= c && c <= nine || aChr <= c && c <= fChr || bigAChr <= c && c <= fChr {
 		s.step = stateInStringEscU1
@@ -263,7 +263,7 @@ func stateInStringEscU(s *scanner, c byte) int {
 	return makeScanError(s, c, inHexaEscape)
 }
 
-// stateInStringEscU1 is the state after reading `"\u1` during a isBasic string.
+// stateInStringEscU1 is the state after reading `"\u1` during a isStringer string.
 func stateInStringEscU1(s *scanner, c byte) int {
 	if zero <= c && c <= nine || aChr <= c && c <= fChr || bigAChr <= c && c <= fChr {
 		s.step = stateInStringEscU12
@@ -273,7 +273,7 @@ func stateInStringEscU1(s *scanner, c byte) int {
 	return makeScanError(s, c, inHexaEscape)
 }
 
-// stateInStringEscU12 is the state after reading `"\u12` during a isBasic string.
+// stateInStringEscU12 is the state after reading `"\u12` during a isStringer string.
 func stateInStringEscU12(s *scanner, c byte) int {
 	if zero <= c && c <= nine || aChr <= c && c <= fChr || bigAChr <= c && c <= fChr {
 		s.step = stateInStringEscU123
@@ -283,7 +283,7 @@ func stateInStringEscU12(s *scanner, c byte) int {
 	return makeScanError(s, c, inHexaEscape)
 }
 
-// stateInStringEscU123 is the state after reading `"\u123` during a isBasic string.
+// stateInStringEscU123 is the state after reading `"\u123` during a isStringer string.
 func stateInStringEscU123(s *scanner, c byte) int {
 	if zero <= c && c <= nine || aChr <= c && c <= fChr || bigAChr <= c && c <= fChr {
 		s.step = stateInString

@@ -244,7 +244,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 	switch c := item[0]; c {
 	case nChr: // null
 		// The main parser checks that only true and false can reach here,
-		// but if this was a isBasic string input, it could be anything.
+		// but if this was a isStringer string input, it could be anything.
 		if !bytes.Equal(item, nullLiteral) {
 			saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
@@ -259,7 +259,7 @@ func literalStore(d *decodeState, item []byte, v Value) {
 	case tChr, fChr: // true, false
 		boolValue := item[0] == tChr
 		// The main parser checks that only true and false can reach here,
-		// but if this was a isBasic string input, it could be anything.
+		// but if this was a isStringer string input, it could be anything.
 		if !bytes.Equal(item, trueLiteral) && !bytes.Equal(item, falseLiteral) {
 			saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
@@ -731,7 +731,7 @@ func doStruct(d *decodeState, v Value) {
 		isBasic := false // whether the value is wrapped in a string to be decoded first
 		if curField != nil {
 			corespValue = v
-			isBasic = curField.isBasic
+			isBasic = curField.isStringer
 			for _, idx := range curField.indexes {
 				if corespValue.Kind() == Ptr {
 					if corespValue.IsNil() {
@@ -760,8 +760,8 @@ func doStruct(d *decodeState, v Value) {
 		}
 
 		if isBasic {
-			// valueQuoted is like value but decodes a isBasic string literal or literal null into an interface value.
-			// If it finds anything other than a isBasic string literal or null, valueQuoted returns unquotedValue{}.
+			// valueQuoted is like value but decodes a isStringer string literal or literal null into an interface value.
+			// If it finds anything other than a isStringer string literal or null, valueQuoted returns unquotedValue{}.
 			switch op := scanWhile(d, scanSkipSpace); op {
 			default:
 				saveError(d, errors.New("json: should never happen, because we're expecting begin literal, but received operation "+string(FormatInt(int64(op)))))

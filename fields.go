@@ -31,7 +31,7 @@ func dominantMarshalField(m marshalFields) (MarshalField, bool) {
 			m = m[:i]
 			break
 		}
-		if f.tag {
+		if f.hasValidTag {
 			if tagged >= 0 {
 				// Multiple tagged fields at the same level: conflict. Return no field.
 				return MarshalField{}, false

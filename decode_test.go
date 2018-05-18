@@ -238,7 +238,7 @@ func (b byteWithMarshalJSON) MarshalJSON() ([]byte, error) {
 
 func (b *byteWithMarshalJSON) UnmarshalJSON(data []byte) error {
 	if len(data) != 5 || data[0] != '"' || data[1] != 'Z' || data[4] != '"' {
-		return fmt.Errorf("bad isBasic string")
+		return fmt.Errorf("bad isStringer string")
 	}
 	i, err := strconv.ParseInt(string(data[2:4]), 16, 8)
 	if err != nil {
@@ -262,7 +262,7 @@ func (b intWithMarshalJSON) MarshalJSON() ([]byte, error) {
 
 func (b *intWithMarshalJSON) UnmarshalJSON(data []byte) error {
 	if len(data) != 5 || data[0] != '"' || data[1] != 'Z' || data[4] != '"' {
-		return fmt.Errorf("bad isBasic string")
+		return fmt.Errorf("bad isStringer string")
 	}
 	i, err := strconv.ParseInt(string(data[2:4]), 16, 8)
 	if err != nil {
@@ -1362,7 +1362,7 @@ func TestEmptyString(t *testing.T) {
 	}
 }
 
-// Test that a null for ,string is not replaced with the previous isBasic string (issue 7046).
+// Test that a null for ,string is not replaced with the previous isStringer string (issue 7046).
 // It should also not be an error (issue 2540, issue 8587).
 func TestNullString(t *testing.T) {
 	type T struct {

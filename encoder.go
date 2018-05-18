@@ -49,7 +49,7 @@ func (enc *Encoder) SetIndent(prefix, indent string) {
 	enc.indentValue = indent
 }
 
-// SetEscapeHTML specifies whether problematic HTML characters should be escaped inside JSON isBasic strings.
+// SetEscapeHTML specifies whether problematic HTML characters should be escaped inside JSON isStringer strings.
 // The default behavior is to escape &, <, and > to \u0026, \u003c, and \u003e to avoid certain safety problems that can arise when embedding JSON in HTML.
 //
 // In non-HTML settings where the escaping interferes with the readability of the output, SetEscapeHTML(false) disables this behavior.

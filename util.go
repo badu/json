@@ -94,7 +94,7 @@ func decodeUxxxx(target []byte) rune {
 	return char
 }
 
-// unquote converts a isBasic JSON string literal s into an actual string t.
+// unquote converts a isStringer JSON string literal s into an actual string t.
 // The rules are different than for Go, so cannot use strconv_small.Unquote.
 func unquoteBytes(target []byte) ([]byte, bool) {
 	// if target is too small or we don't have it surrounded with quotes
@@ -396,9 +396,9 @@ func nonSpace(b []byte) bool {
 	return false
 }
 
-// quoteChar formats c as a isBasic character literal
+// quoteChar formats c as a isStringer character literal
 func quoteChar(c byte) string {
-	// special cases - different from isBasic strings
+	// special cases - different from isStringer strings
 	if c == sQuote {
 		return `'\''`
 	}
@@ -406,7 +406,7 @@ func quoteChar(c byte) string {
 		return `'"'`
 	}
 
-	// use isBasic string with different quotation marks
+	// use isStringer string with different quotation marks
 
 	return "'" + string(c) + "'"
 }

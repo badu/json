@@ -225,12 +225,6 @@ type (
 		Err  error
 	}
 
-	encOpts struct {
-		quoted          bool // isBasic causes primitive fields to be encoded inside JSON strings.
-		escapeHTML      bool // escapeHTML causes '<', '>', and '&' to be escaped in JSON strings.
-		willSortMapKeys bool // map keys sorting. Default false
-	}
-
 	// A SyntaxError is a description of a JSON syntax error.
 	SyntaxError struct {
 		msg    string // description of error
@@ -312,16 +306,25 @@ type (
 		keyName   []byte
 	}
 
+	encOpts struct {
+		quoted               bool   // isStringer causes primitive fields to be encoded inside JSON strings.
+		escapeHTML           bool   // escapeHTML causes '<', '>', and '&' to be escaped in JSON strings.
+		willSortMapKeys      bool   // map keys sorting. Default false
+		willCheckEmptyStruct bool   // keeps current field in case of omitempty for basic struct (with native fields) and nullable structs
+		nullableReturn       []byte // returns the result of nullable
+	}
+
 	marshalFields []MarshalField // unmarshalFields sorts field by index sequence.
 	// A field represents a single field found in a struct.
 	MarshalField struct {
-		indexes       []int
-		name          []byte
-		equalFold     qualFn // bytes.EqualFold or equivalent
-		tag           bool
-		willOmit      bool
-		isBasic       bool
-		isNullSuspect bool
+		indexes     []int
+		name        []byte
+		equalFold   qualFn // bytes.EqualFold or equivalent
+		hasValidTag bool   // has a valid json tag
+		isOmitted   bool   // has "omitempty" options json tag
+		isStringer  bool   // has "string" options json tag
+		isNullable  bool   // name (starts with Null OR struct has native fields) AND isOmitted = true
+		isNative    bool   // Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String
 	}
 
 	visitField struct {

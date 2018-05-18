@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"sort"
 	"sync"
-	"time"
 	"unicode/utf8"
 )
 
@@ -197,12 +196,21 @@ func marshalerEncoder(e *encodeState, v Value) {
 	}
 	m, ok := v.valueInterface().(Marshaler)
 	if !ok {
-		// TODO : signal error
+		// TODO : seems this silent error spoils the tests. IMO it should be an error
 		e.Write(nullLiteral)
 		return
 	}
 	b, err := m.MarshalJSON()
 	if err == nil {
+		if e.opts.willCheckEmptyStruct {
+			// omit []byte("null") returns - since the field is nullable, we are omitting it entirely
+			if bytes.Equal(nullLiteral, b) {
+				return
+			}
+			// we store the result to be written in place later
+			e.opts.nullableReturn = b
+			return
+		}
 		// copy JSON into buffer, checking validity.
 		err = compact(&e.Buffer, b, e.opts.escapeHTML)
 	}
@@ -223,12 +231,21 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 	}
 	m, ok := va.valueInterface().(Marshaler)
 	if !ok {
-		// TODO : signal error
+		// TODO : seems this silent error spoils the tests. IMO it should be an error
 		e.Write(nullLiteral)
 		return
 	}
 	b, err := m.MarshalJSON()
 	if err == nil {
+		if e.opts.willCheckEmptyStruct {
+			// omit []byte("null") returns - since the field is nullable, we are omitting it entirely
+			if bytes.Equal(nullLiteral, b) {
+				return
+			}
+			// we store the result to be written in place later
+			e.opts.nullableReturn = b
+			return
+		}
 		// copy JSON into buffer, checking validity.
 		err = compact(&e.Buffer, b, true)
 	}
@@ -269,27 +286,32 @@ func uintEncoder(e *encodeState, v Value) {
 	}
 }
 
-func float32Encoder(e *encodeState, v Value) {
-	value := float64(*(*float32)(v.Ptr))
-	if math.IsInf(value, 0) || math.IsNaN(value) {
-		encodeError(e, &UnsupportedValueError{FormatFloat(value, 32)})
+func floatHelper(e *encodeState, floatValue float64, bits int) []byte {
+	if math.IsInf(floatValue, 0) || math.IsNaN(floatValue) {
+		encodeError(e, &UnsupportedValueError{FormatFloat(floatValue, bits)})
 	}
 
 	// Convert as if by ES6 number to string conversion.
 	// This matches most other JSON generators.
 	// See golang.org/issue/6384 and golang.org/issue/14135.
 	// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-	abs := math.Abs(value)
+	abs := math.Abs(floatValue)
 	fmt := fChr
 	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
 	if abs != 0 {
-		if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
-			fmt = eChr
+		if bits == 32 {
+			if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
+				fmt = eChr
+			}
+		} else {
+			if abs < 1e-6 || abs >= 1e21 {
+				fmt = eChr
+			}
 		}
 
 	}
 
-	b := makeFloatBytes(value, fmt, 32)
+	b := makeFloatBytes(floatValue, fmt, bits)
 	if fmt == eChr {
 		// clean up e-09 to e-9
 		n := len(b)
@@ -298,7 +320,12 @@ func float32Encoder(e *encodeState, v Value) {
 			b = b[:n-1]
 		}
 	}
+	return b
+}
 
+func float32Encoder(e *encodeState, v Value) {
+	value := float64(*(*float32)(v.Ptr))
+	b := floatHelper(e, value, 32)
 	if e.opts.quoted {
 		e.WriteQuoted(b)
 	} else {
@@ -308,32 +335,7 @@ func float32Encoder(e *encodeState, v Value) {
 
 func float64Encoder(e *encodeState, v Value) {
 	value := *(*float64)(v.Ptr)
-	if math.IsInf(value, 0) || math.IsNaN(value) {
-		encodeError(e, &UnsupportedValueError{FormatFloat(value, 64)})
-	}
-
-	// Convert as if by ES6 number to string conversion.
-	// This matches most other JSON generators.
-	// See golang.org/issue/6384 and golang.org/issue/14135.
-	// Like fmt %g, but the exponent cutoffs are different and exponents themselves are not padded to two digits.
-	abs := math.Abs(value)
-	fmt := fChr
-	if abs != 0 {
-		if abs < 1e-6 || abs >= 1e21 {
-			fmt = eChr
-		}
-	}
-
-	b := makeFloatBytes(value, fmt, 64)
-	if fmt == eChr {
-		// clean up e-09 to e-9
-		n := len(b)
-		if n >= 4 && b[n-4] == eChr && b[n-3] == minus && b[n-2] == zero {
-			b[n-2] = b[n-1]
-			b = b[:n-1]
-		}
-	}
-
+	b := floatHelper(e, value, 64)
 	if e.opts.quoted {
 		e.WriteQuoted(b)
 	} else {
@@ -520,6 +522,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		// taking only the required info, ignoring the rest
 		switch typedMap.KeyType.Kind() {
 		case String:
+			//TODO : test race condition - instead of copying key, we just reference to it, to reduce allocations
 			header := (*stringHeader)(ptr(keyPointer))
 			var b []byte
 			byteHeader := (*sliceHeader)(ptr(&b))
@@ -655,12 +658,44 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 }
 
 func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
+	fields := getCachedFields(v.Type)
+
+	if e.opts.willCheckEmptyStruct {
+		allFieldsEmpty := true
+		for _, curField := range fields {
+			// restoring to original value type, since it gets altered below
+			fieldValue := v
+
+			for _, idx := range curField.indexes {
+				if fieldValue.Kind() == Ptr {
+					if fieldValue.IsNil() {
+						continue
+					}
+					fieldValue = valueDeref(fieldValue)
+				}
+				fieldValue = fieldValue.getField(idx)
+			}
+
+			if !fieldValue.IsValid() {
+				continue
+			}
+
+			if !isEmptyValue(fieldValue) {
+				allFieldsEmpty = false
+			}
+		}
+
+		// all fields are empty : omit the struct entirely
+		if allFieldsEmpty {
+			return
+		}
+	}
 
 	// Mark Struct Start
 	e.WriteByte(curlOpen)
 
 	first := true
-	for i, curField := range getCachedFields(v.Type) {
+	for i, curField := range fields {
 		// restoring to original value type, since it gets altered below
 		fieldValue := v
 
@@ -680,97 +715,65 @@ func (ae *allEncoder) encodeStruct(e *encodeState, v Value) {
 		}
 
 		// empty value and flagged as omitted
-		if isEmptyValue(fieldValue) && curField.willOmit {
+		if isEmptyValue(fieldValue) && curField.isOmitted {
 			continue
 		}
 
-		// Serialize Nulls Condition : 1. is a struct which has a name that starts with "Null" and must have "omitempty"
-		if curField.isNullSuspect {
-			subFields := getCachedFields(fieldValue.Type)
-
-			// 2. has exactly two fields : one boolean (called Valid) and one of a basic type (called as the basic type - e.g. "String")
-			if len(subFields) == 2 {
-				var validField, carrierField Value
-				for _, sf := range subFields {
-					if bytes.Equal(sf.name, validLiteral) {
-						validField = fieldValue
-						for _, idx2 := range sf.indexes {
-							if validField.Kind() == Ptr {
-								if validField.IsNil() {
-									validField = Value{}
-									break
-								}
-							}
-							validField = validField.getField(idx2)
-						}
-					} else {
-						carrierField = fieldValue
-						for _, idx2 := range sf.indexes {
-							if carrierField.Kind() == Ptr {
-								if carrierField.IsNil() {
-									carrierField = Value{}
-									break
-								}
-							}
-							carrierField = carrierField.getField(idx2)
-						}
-
-					}
+		// checking if it's a struct which has an omitempty option, but not nullable
+		if !curField.isNullable && curField.isOmitted && fieldValue.Kind() == Struct {
+			//println("checking (once) if is all native : " + string(curField.name))
+			// checking if all the struct fields are marked as native
+			allNative := true
+			for _, strctField := range getCachedFields(fieldValue.Type) {
+				if !strctField.isNative {
+					allNative = false
+					break
 				}
-
-				if validField.IsValid() && carrierField.IsValid() {
-					isTrue := *(*bool)(validField.Ptr)
-
-					switch carrierField.Kind() {
-					case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
-						if isTrue {
-							if !first {
-								e.WriteByte(comma)
-							}
-							writeBytes(e, curField.name)
-							e.WriteByte(colon)
-							e.opts.quoted = curField.isBasic
-							switch carrierField.Kind() {
-							case Bool:
-								boolEncoder(e, carrierField)
-							case Int, Int8, Int16, Int32, Int64:
-								intEncoder(e, carrierField)
-							case Uint, Uint8, Uint16, Uint32, Uint64, UintPtr:
-								uintEncoder(e, carrierField)
-							case Float32:
-								float32Encoder(e, carrierField)
-							case Float64:
-								float64Encoder(e, carrierField)
-							case String:
-								stringEncoder(e, carrierField)
-							}
-						}
-						continue
-					default:
-						if !isTrue {
-							// if it's time, we're avoiding writing "null"
-							_, isTime := carrierField.valueInterface().(time.Time)
-							if isTime {
-								continue
-							}
-						}
-						// even if it's time, we're allowing Marshaler implementations (just to be able to format it)
-					}
-				}
+			}
+			// will omit empty, but not nullable (OPTIONAL Marshaler)
+			if allNative {
+				//println(string(curField.name) + " marked all native.")
+				curField.isNullable = true // thus we won't enter this loop again
 			}
 		}
 
-		if first {
-			first = false
+		if curField.isNullable {
+			// current field is needed for checks of flags
+			e.opts.willCheckEmptyStruct = true
+			// special case : we're calling 1. unmarshal encoder or 2. struct encoder
+			ae.encs[i](e, fieldValue)
+			// the encoder responded
+			if len(e.opts.nullableReturn) > 0 {
+				//println("response : `" + string(e.opts.nullableReturn) + "` on " + string(curField.name))
+				// we cannot move the below `comma` code above, because some fields are empty and we might double the commas
+				if first {
+					first = false
+				} else {
+					e.WriteByte(comma)
+				}
+				// we have a response from nullable struct or omit empty simple struct
+				writeBytes(e, curField.name)
+				e.WriteByte(colon)
+				e.Write(e.opts.nullableReturn)
+			}
+			// reset the last return
+			e.opts.nullableReturn = emptyByte
+			// reset the current field
+			e.opts.willCheckEmptyStruct = false
 		} else {
-			e.WriteByte(comma)
+
+			if first {
+				first = false
+			} else {
+				e.WriteByte(comma)
+			}
+
+			writeBytes(e, curField.name)
+			e.WriteByte(colon)
+			e.opts.quoted = curField.isStringer
+
+			ae.encs[i](e, fieldValue)
 		}
-
-		writeBytes(e, curField.name)
-		e.WriteByte(colon)
-		e.opts.quoted = curField.isBasic
-
-		ae.encs[i](e, fieldValue)
 	}
 
 	//Mark Struct End
@@ -984,26 +987,26 @@ func getMarshalFields(t *RType) marshalFields {
 
 				// Record found field and index sequence.
 				if tagged || !embedded || fieldKind != Struct {
-					// Only strings, floats, integers, and booleans implies isBasic.
-					isBasic := false
-					if tagContains(opts, stringTagOption) {
-						switch fieldKind {
-						case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
-							isBasic = true
-						}
-					}
-					willBeOmitted := tagContains(opts, omitTagOption)
-					f := MarshalField{
-						name:      jsonName,
-						tag:       tagged,
-						indexes:   indexes,
-						equalFold: foldFunc(jsonName),
-						isBasic:   isBasic,
-						willOmit:  willBeOmitted,
+
+					// Only strings, floats, integers, and booleans.
+					isNative := false
+					switch fieldKind {
+					case Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, UintPtr, Float32, Float64, String:
+						isNative = true
 					}
 
-					if bytes.HasPrefix(fieldType.byteName(), capitalNullLiteral) && fieldKind == Struct && willBeOmitted {
-						f.isNullSuspect = true
+					f := MarshalField{
+						name:        jsonName,
+						hasValidTag: tagged,
+						indexes:     indexes,
+						equalFold:   foldFunc(jsonName),
+						isStringer:  tagContains(opts, stringTagOption) && isNative,
+						isNative:    isNative,
+						isOmitted:   tagContains(opts, omitTagOption),
+					}
+
+					if bytes.HasPrefix(fieldType.byteName(), capitalNullLiteral) && fieldKind == Struct && f.isOmitted {
+						f.isNullable = true
 					}
 
 					result = append(result, f)
@@ -1036,8 +1039,8 @@ func getMarshalFields(t *RType) marshalFields {
 		if len(x[i].indexes) != len(x[j].indexes) {
 			return len(x[i].indexes) < len(x[j].indexes)
 		}
-		if x[i].tag != x[j].tag {
-			return x[i].tag
+		if x[i].hasValidTag != x[j].hasValidTag {
+			return x[i].hasValidTag
 		}
 		return x.Less(i, j)
 	})

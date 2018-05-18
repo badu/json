@@ -48,8 +48,7 @@ var optionalsExpected = `{
  "fr": 0,
  "br": false,
  "ur": 0,
- "str": {},
- "sto": {}
+ "str": {}
 }`
 
 func TestOmitEmpty(t *testing.T) {
@@ -1155,6 +1154,71 @@ type (
 		Time  time.Time
 		Valid bool
 	}
+	// NullInt is an nullable int64.
+	// It does not consider zero values to be null.
+	// It will decode to null, not zero, if null.
+	NullInt struct {
+		sql.NullInt64
+	}
+
+	NullBool struct {
+		sql.NullBool
+	}
+
+	NullUint struct {
+		Valid bool
+		Uint  uint64
+	}
+
+	// String is a nullable string. It supports SQL and JSON serialization.
+	// It will marshal to null if null. Blank string input will be considered null.
+	NullString struct {
+		sql.NullString
+	}
+
+	NullFloat struct {
+		sql.NullFloat64
+	}
+
+	NullNotNull interface {
+	}
+
+	// TODO : make issue on Github - EmptyStruct should be omitted if all properties are empty, isn't it?
+	EmptyStruct struct {
+		Id   int64  `json:"id,omitempty"`
+		Name string `json:"name"`
+		Bool bool   `json:"bool,omitempty"`
+	}
+
+	Purchase struct {
+		ID              int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
+		EmptyName       string      `json:"emptyName,omitempty"`
+		EmptyId         int64       `json:"emptyId,omitempty"`
+		EmptyBool       bool        `json:"emptyBool,omitempty"`
+		UUID            NullString  `json:"nullUuid,omitempty"`
+		LicenseUUID     NullString  `json:"nullLicenseUuid,omitempty"`
+		One             NullInt     `json:"one,omitempty"`
+		Two             NullInt     `json:"two,omitempty"`
+		Three           NullUint    `json:"three,omitempty"`
+		StartDate       NullTime    `json:"startDate,omitempty"` // TODO : move this uppper (before One) to check for bugs
+		EndDate         NullTime    `json:"endDate,omitempty"`
+		MyStruct        EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
+		MyStruct2       EmptyStruct `json:"myOtherStruct"`
+		TestNullNotNull NullNotNull `json:"testNullInterface,omitempty"`
+		NullPrice       NullFloat   `json:"price,omitempty"`
+		NullBool        NullBool    `json:"nullBool,omitempty"`
+	}
+
+	Purchase2 struct {
+		ID        int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
+		EmptyName string      `json:"emptyName,omitempty"`
+		EmptyId   int64       `json:"emptyId,omitempty"`
+		EmptyBool bool        `json:"emptyBool,omitempty"`
+		UUID      NullString  `json:"nullUuid"`
+		StartDate NullTime    `json:"startDate"`
+		One       NullInt     `json:"one"`
+		MyStruct  EmptyStruct `json:"myStruct"`
+	}
 )
 
 // MarshalJSON implements json.Marshaler.
@@ -1166,46 +1230,53 @@ func (t NullTime) MarshalJSON() ([]byte, error) {
 	return t.Time.MarshalJSON()
 }
 
+func (t NullInt) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	return FormatInt(t.Int64), nil
+}
+
+func (t NullUint) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	return FormatUint(t.Uint), nil
+}
+
+func (t NullFloat) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	abs := math.Abs(t.Float64)
+	fmt := fChr
+	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
+	if abs != 0 {
+		if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
+			fmt = eChr
+		}
+	}
+	return makeFloatBytes(t.Float64, fmt, 64), nil
+}
+
+func (t NullString) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	return []byte("\"" + t.String + "\""), nil
+}
+
+func (t NullBool) MarshalJSON() ([]byte, error) {
+	if !t.Valid {
+		return []byte("null"), nil
+	}
+	if t.Bool {
+		return []byte("true"), nil
+	}
+	return []byte("false"), nil
+}
+
 func TestNewNull(t *testing.T) {
-	type (
-		// TODO : make issue on Github - EmptyStruct should be omitted if all properties are empty, isn't it?
-		EmptyStruct struct {
-			Id   int64  `json:"id,omitempty"`
-			Name string `json:"name,omitempty"`
-			Bool bool   `json:"bool,omitempty"`
-		}
-
-		// NullInt is an nullable int64.
-		// It does not consider zero values to be null.
-		// It will decode to null, not zero, if null.
-		NullInt struct {
-			sql.NullInt64
-		}
-
-		// String is a nullable string. It supports SQL and JSON serialization.
-		// It will marshal to null if null. Blank string input will be considered null.
-		NullString struct {
-			sql.NullString
-		}
-
-		NullNotNull interface {
-		}
-
-		Purchase struct {
-			ID              int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
-			EmptyName       string      `json:"emptyName,omitempty"`
-			EmptyId         int64       `json:"emptyId,omitempty"`
-			EmptyBool       bool        `json:"emptyBool,omitempty"`
-			UUID            NullString  `json:"nullUuid,omitempty"`
-			LicenseUUID     NullString  `json:"nullLicenseUuid,omitempty"`
-			StartDate       NullTime    `json:"startDate,omitempty"`
-			EndDate         NullTime    `json:"endDate,omitempty"`
-			One             NullInt     `json:"one,omitempty"`
-			Two             NullInt     `json:"two,omitempty"`
-			MyStruct        EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
-			TestNullNotNull NullNotNull `json:"testNullInterface,omitempty"`
-		}
-	)
 	now := time.Now()
 	p := Purchase{
 		EmptyName: "Purchase Empty Name",
@@ -1215,16 +1286,34 @@ func TestNewNull(t *testing.T) {
 				String: "1234-1234-1234-1234-1234",
 			},
 		},
-		StartDate: NullTime{
-			Valid: true,
-			Time:  now,
-		},
 		Two: NullInt{
 			sql.NullInt64{
 				Valid: true,
 				Int64: 3000,
 			},
 		},
+		Three: NullUint{
+			Valid: true,
+			Uint:  uint64(4000),
+		},
+		StartDate: NullTime{
+			Valid: true,
+			Time:  now,
+		},
+		NullBool: NullBool{
+			sql.NullBool{
+				Valid: true,
+				Bool:  true,
+			},
+		},
+		/**
+		NullPrice:NullFloat{
+			sql.NullFloat64{
+				Valid:true,
+				Float64:1e-6,//"price":0.000001
+			},
+		},
+		**/
 	}
 
 	result, err := Marshal(p)
@@ -1232,10 +1321,21 @@ func TestNewNull(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := now.MarshalJSON()
-	expect := `{"emptyName":"Purchase Empty Name","nullUuid":"1234-1234-1234-1234-1234","startDate":` + string(r) + `,"two":3000,"myStruct":{}}`
-
+	expect := `{"emptyName":"Purchase Empty Name","nullUuid":"1234-1234-1234-1234-1234","two":3000,"three":4000,"startDate":` + string(r) + `,"myOtherStruct":{"name":""},"nullBool":true}`
 	if string(result) != expect {
-		t.Errorf(" got\n%s\nwant\n%s", string(result), expect)
+		t.Errorf(" got / want : \n%s\n%s", string(result), expect)
 	}
+
 	//t.Logf("Result : %s", string(result))
+	p2 := Purchase2{
+		EmptyName: "Purchase 2 Empty Name",
+	}
+	result, err = Marshal(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect2 := `{"emptyName":"Purchase 2 Empty Name","nullUuid":null,"startDate":null,"one":null,"myStruct":{"name":""}}`
+	if string(result) != expect2 {
+		t.Errorf(" got / want : \n%s\n%s", string(result), expect2)
+	}
 }
