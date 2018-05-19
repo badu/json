@@ -498,6 +498,7 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 	// iterating over map keys
 	it := mapiterinit(v.Type, mapPtr)
 
+	hasPointerToKeys := false
 	mapKeys := make([]KeyValuePair, mapLen)
 	for i := 0; i < mapLen; i++ {
 		key := mapiterkey(it)
@@ -506,14 +507,17 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			break
 		}
 
-		var isPointer bool
+		//var isPointer bool
 		var keyPointer ptr
 
 		if typedMap.KeyType.isDirectIface() {
-			// Copy result so future changes to the map won't change the underlying value.
-			keyPointer = unsafeNew(typedMap.KeyType)
-			typedmemmove(typedMap.KeyType, keyPointer, key)
-			isPointer = true
+			hasPointerToKeys = true
+			//isPointer = true
+			// TODO : developer should pay attention on NOT changing the map while we're Marshaling. If you enconter troubles, comment the next line and uncomment the two lines below it
+			keyPointer = key
+			// Below code was used to copy result so future changes to the map won't change the underlying value.
+			// keyPointer = unsafeNew(typedMap.KeyType)
+			// typedmemmove(typedMap.KeyType, keyPointer, key)
 		} else {
 			// by default we're taking the pointer (which means it's not a pointer to pointer)
 			keyPointer = *(*ptr)(key)
@@ -530,75 +534,75 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 			byteHeader.Len = header.Len
 			byteHeader.Cap = header.Len
 			mapKeys[i] = KeyValuePair{
-				keyName:   b, //[]byte(*(*string)(keyPointer)),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: b, //[]byte(*(*string)(keyPointer)),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Int:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatInt(int64(*(*int)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatInt(int64(*(*int)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Int8:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatInt(int64(*(*int8)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatInt(int64(*(*int8)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Int16:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatInt(int64(*(*int16)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatInt(int64(*(*int16)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Int32:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatInt(int64(*(*int32)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatInt(int64(*(*int32)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Int64:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatInt(*(*int64)(keyPointer)),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatInt(*(*int64)(keyPointer)),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Uint:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(uint64(*(*uint)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(uint64(*(*uint)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Uint8:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(uint64(*(*uint8)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(uint64(*(*uint8)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Uint16:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(uint64(*(*uint16)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(uint64(*(*uint16)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Uint32:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(uint64(*(*uint32)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(uint64(*(*uint32)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case Uint64:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(*(*uint64)(keyPointer)),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(*(*uint64)(keyPointer)),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		case UintPtr:
 			mapKeys[i] = KeyValuePair{
-				keyName:   FormatUint(uint64(*(*uintptr)(keyPointer))),
-				isPointer: isPointer,
-				ptr:       keyPointer,
+				keyName: FormatUint(uint64(*(*uintptr)(keyPointer))),
+				//isPointer: isPointer,
+				ptr: keyPointer,
 			}
 		default:
 			panic("Bad key kind!")
@@ -634,7 +638,8 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 		e.WriteByte(colon)
 
 		var keyPtr ptr
-		if key.isPointer {
+		//if key.isPointer {
+		if hasPointerToKeys {
 			keyPtr = key.ptr
 		} else {
 			keyPtr = ptr(&key.ptr)
@@ -642,10 +647,12 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 
 		elemPtr := mapaccess(v.Type, mapPtr, keyPtr)
 		if typedMap.ElemType.isDirectIface() {
-			// Copy result so future changes to the map won't change the underlying value.
-			mapElemValue := unsafeNew(typedMap.ElemType)
-			typedmemmove(typedMap.ElemType, mapElemValue, elemPtr)
-			elemVal.Ptr = mapElemValue
+			// TODO : developer should pay attention on NOT changing the map while we're Marshaling. If you enconter troubles, comment the next line and uncomment the three lines below it
+			elemVal.Ptr = elemPtr
+			// Below code was used to copy result so future changes to the map won't change the underlying value.
+			//mapElemValue := unsafeNew(typedMap.ElemType)
+			//typedmemmove(typedMap.ElemType, mapElemValue, elemPtr)
+			//elemVal.Ptr = mapElemValue
 		} else {
 			elemVal.Ptr = *(*ptr)(elemPtr)
 		}
@@ -1005,7 +1012,7 @@ func getMarshalFields(t *RType) marshalFields {
 						isOmitted:   tagContains(opts, omitTagOption),
 					}
 
-					if bytes.HasPrefix(fieldType.byteName(), capitalNullLiteral) && fieldKind == Struct && f.isOmitted {
+					if fieldKind == Struct && f.isOmitted && bytes.HasPrefix(fieldType.byteName(), capitalNullLiteral) {
 						f.isNullable = true
 					}
 

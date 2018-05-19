@@ -39,3 +39,8 @@ Last updated : 18th of May 2018
 ```
 
 The result is `{"id":3}` not `{"id":3,"myStruct":{}}`.
+
+# Possible Known Issues
+
+1. Working with maps : when using Marshal with maps, developers should make sure that the map doesn't change. 
+For allocation reasons, I have removed the code that was copying map's key and value before reading it.

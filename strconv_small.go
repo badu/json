@@ -1137,6 +1137,7 @@ func formatDigits(neg bool, digs decimalSlice, prec int, fmt byte) []byte {
 
 // %e: -d.ddddde±dd
 func fmtE(neg bool, d decimalSlice, prec int, fmt byte) []byte {
+	//TODO : allocations
 	dst := make([]byte, 0, 24)
 	// sign
 	if neg {
@@ -1193,6 +1194,7 @@ func fmtE(neg bool, d decimalSlice, prec int, fmt byte) []byte {
 
 // %f: -ddddddd.ddddd
 func fmtF(neg bool, d decimalSlice, prec int) []byte {
+	//TODO : allocations
 	dst := make([]byte, 0, 24)
 	// sign
 	if neg {

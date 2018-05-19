@@ -301,9 +301,9 @@ type (
 	For this reason, sorting map keys is optional and default false.
 	*/
 	KeyValuePair struct {
-		ptr       ptr
-		isPointer bool
-		keyName   []byte
+		ptr ptr
+		//isPointer bool
+		keyName []byte
 	}
 
 	encOpts struct {
