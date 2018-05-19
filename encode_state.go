@@ -927,8 +927,9 @@ func getMarshalFields(t *RType) marshalFields {
 	visited := map[*RType]bool{}
 	empty := map[*RType]int{}
 
-	// Fields found.
-	var result marshalFields
+	// Fields found. Is better (?) than just declaring the var and append
+	cs := (*structType)(ptr(t))
+	result := make(marshalFields, 0, len(cs.fields))
 
 	for len(next) > 0 {
 		fields, next = next, fields[:0]
