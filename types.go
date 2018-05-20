@@ -7,6 +7,7 @@
 package json
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"sync"
@@ -185,8 +186,8 @@ type (
 
 	// An encodeState encodes JSON into a bytes.Buffer.
 	encodeState struct {
-		Buffer // accumulated output
-		opts   encOpts
+		bytes.Buffer // accumulated output
+		opts         encOpts
 	}
 
 	errorContext struct {
@@ -273,7 +274,7 @@ type (
 		err          error
 		escapeHTML   bool
 		sortMapKeys  bool
-		indentBuf    *Buffer
+		indentBuf    *bytes.Buffer
 		indentPrefix string
 		indentValue  string
 	}

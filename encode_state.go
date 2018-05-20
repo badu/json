@@ -32,20 +32,29 @@ func writeString(e *encodeState, name string) {
 			}
 			switch run {
 			case backSlash, quote:
-				e.WriteBytes(backSlash, run)
+				e.WriteByte(backSlash)
+				e.WriteByte(run)
 			case newLine:
-				e.WriteBytes(backSlash, nChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(nChr)
 			case retChar:
-				e.WriteBytes(backSlash, rChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(rChr)
 			case tab:
-				e.WriteBytes(backSlash, tChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(tChr)
 			default:
 				// This encodes bytes < 0x20 except for \t, \n and \r.
 				// If escapeHTML is set, it also escapes <, >, and &
 				// because they can lead to security holes when
 				// user-controlled strings are rendered into JSON
 				// and served to some browsers.
-				e.WriteBytes(backSlash, uChr, zero, zero, hex[run>>4], hex[run&0xF])
+				e.WriteByte(backSlash)
+				e.WriteByte(uChr)
+				e.WriteByte(zero)
+				e.WriteByte(zero)
+				e.WriteByte(hex[run>>4])
+				e.WriteByte(hex[run&0xF])
 			}
 			i++
 			start = i
@@ -56,7 +65,12 @@ func writeString(e *encodeState, name string) {
 			if start < i {
 				e.WriteString(name[start:i])
 			}
-			e.WriteBytes(backSlash, uChr, fChr, fChr, fChr, dChr)
+			e.WriteByte(backSlash)
+			e.WriteByte(uChr)
+			e.WriteByte(fChr)
+			e.WriteByte(fChr)
+			e.WriteByte(fChr)
+			e.WriteByte(dChr)
 			i += size
 			start = i
 			continue
@@ -69,7 +83,12 @@ func writeString(e *encodeState, name string) {
 			if start < i {
 				e.WriteString(name[start:i])
 			}
-			e.WriteBytes(backSlash, uChr, two, zero, two, hex[c&0xF])
+			e.WriteByte(backSlash)
+			e.WriteByte(uChr)
+			e.WriteByte(two)
+			e.WriteByte(zero)
+			e.WriteByte(two)
+			e.WriteByte(hex[c&0xF])
 			i += size
 			start = i
 			continue
@@ -102,20 +121,29 @@ func writeBytes(e *encodeState, s []byte) {
 			}
 			switch s[i] {
 			case backSlash, quote:
-				e.WriteBytes(backSlash, s[i])
+				e.WriteByte(backSlash)
+				e.WriteByte(s[i])
 			case newLine:
-				e.WriteBytes(backSlash, nChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(nChr)
 			case retChar:
-				e.WriteBytes(backSlash, rChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(rChr)
 			case tab:
-				e.WriteBytes(backSlash, tChr)
+				e.WriteByte(backSlash)
+				e.WriteByte(tChr)
 			default:
 				// This encodes bytes < 0x20 except for \t, \n and \r.
 				// If escapeHTML is set, it also escapes <, >, and &
 				// because they can lead to security holes when
 				// user-controlled strings are rendered into JSON
 				// and served to some browsers.
-				e.WriteBytes(backSlash, uChr, zero, zero, hex[s[i]>>4], hex[s[i]&0xF])
+				e.WriteByte(backSlash)
+				e.WriteByte(uChr)
+				e.WriteByte(zero)
+				e.WriteByte(zero)
+				e.WriteByte(hex[s[i]>>4])
+				e.WriteByte(hex[s[i]&0xF])
 			}
 			// set new start and continue looking for runes
 			i++
@@ -129,7 +157,12 @@ func writeBytes(e *encodeState, s []byte) {
 			if start < i {
 				e.Write(s[start:i])
 			}
-			e.WriteBytes(backSlash, uChr, fChr, fChr, fChr, dChr)
+			e.WriteByte(backSlash)
+			e.WriteByte(uChr)
+			e.WriteByte(fChr)
+			e.WriteByte(fChr)
+			e.WriteByte(fChr)
+			e.WriteByte(dChr)
 			i += size
 			start = i
 			continue
@@ -145,7 +178,12 @@ func writeBytes(e *encodeState, s []byte) {
 			if start < i {
 				e.Write(s[start:i])
 			}
-			e.WriteBytes(backSlash, uChr, two, zero, two, hex[c&0xF])
+			e.WriteByte(backSlash)
+			e.WriteByte(uChr)
+			e.WriteByte(two)
+			e.WriteByte(zero)
+			e.WriteByte(two)
+			e.WriteByte(hex[c&0xF])
 			i += size
 			start = i
 			continue
@@ -257,13 +295,17 @@ func addrMarshalerEncoder(e *encodeState, v Value) {
 func boolEncoder(e *encodeState, v Value) {
 	if *(*bool)(v.Ptr) {
 		if e.opts.quoted {
-			e.WriteQuoted(trueLiteral)
+			e.WriteByte(quote)
+			e.Write(trueLiteral)
+			e.WriteByte(quote)
 		} else {
 			e.Write(trueLiteral)
 		}
 	} else {
 		if e.opts.quoted {
-			e.WriteQuoted(falseLiteral)
+			e.WriteByte(quote)
+			e.Write(falseLiteral)
+			e.WriteByte(quote)
 		} else {
 			e.Write(falseLiteral)
 		}
@@ -272,7 +314,9 @@ func boolEncoder(e *encodeState, v Value) {
 
 func intEncoder(e *encodeState, v Value) {
 	if e.opts.quoted {
-		e.WriteQuoted(FormatInt(v.Int()))
+		e.WriteByte(quote)
+		e.Write(FormatInt(v.Int()))
+		e.WriteByte(quote)
 	} else {
 		e.Write(FormatInt(v.Int()))
 	}
@@ -280,7 +324,9 @@ func intEncoder(e *encodeState, v Value) {
 
 func uintEncoder(e *encodeState, v Value) {
 	if e.opts.quoted {
-		e.WriteQuoted(FormatUint(v.Uint()))
+		e.WriteByte(quote)
+		e.Write(FormatUint(v.Uint()))
+		e.WriteByte(quote)
 	} else {
 		e.Write(FormatUint(v.Uint()))
 	}
@@ -327,7 +373,9 @@ func float32Encoder(e *encodeState, v Value) {
 	value := float64(*(*float32)(v.Ptr))
 	b := floatHelper(e, value, 32)
 	if e.opts.quoted {
-		e.WriteQuoted(b)
+		e.WriteByte(quote)
+		e.Write(b)
+		e.WriteByte(quote)
 	} else {
 		e.Write(b)
 	}
@@ -337,7 +385,9 @@ func float64Encoder(e *encodeState, v Value) {
 	value := *(*float64)(v.Ptr)
 	b := floatHelper(e, value, 64)
 	if e.opts.quoted {
-		e.WriteQuoted(b)
+		e.WriteByte(quote)
+		e.Write(b)
+		e.WriteByte(quote)
 	} else {
 		e.Write(b)
 	}
@@ -380,7 +430,9 @@ func encodeByteSlice(e *encodeState, v Value) {
 		// for small buffers, using Encode directly is much faster.
 		dst := make([]byte, base64.StdEncoding.EncodedLen(len(value)))
 		base64.StdEncoding.Encode(dst, value)
-		e.WriteQuoted(dst)
+		e.WriteByte(quote)
+		e.Write(dst)
+		e.WriteByte(quote)
 	} else {
 		e.WriteByte(quote)
 		// for large buffers, avoid unnecessary extra temporary buffer space.
@@ -490,7 +542,8 @@ func (ae *allEncoder) encodeMap(e *encodeState, v Value) {
 	}
 	// fail fast for no allocation
 	if mapLen == 0 {
-		e.WriteBytes(curlOpen, curlClose)
+		e.WriteByte(curlOpen)
+		e.WriteByte(curlClose)
 		return
 	}
 	// prepare map keys

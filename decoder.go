@@ -24,16 +24,16 @@ func (d *Decoder) Decode(target interface{}) error {
 		return d.err
 	}
 
-	if err := d.tokenPrepareForDecode(); err != nil {
+	if err := tokenPrepareForDecode(d); err != nil {
 		return err
 	}
 
-	if !d.tokenValueAllowed() {
-		return &SyntaxError{msg: "not at beginning of value", Offset: d.offset()}
+	if !tokenValueAllowed(d) {
+		return &SyntaxError{msg: "not at beginning of value", Offset: offset(d)}
 	}
 
 	// Read whole value into buffer.
-	n, err := d.readValue()
+	n, err := decodeValue(d)
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (d *Decoder) Decode(target interface{}) error {
 	err = unmarshal(&d.state, target)
 
 	// fixup token streaming state
-	d.tokenValueEnd()
+	tokenValueEnd(d)
 
 	return err
 }
@@ -54,8 +54,113 @@ func (d *Decoder) Buffered() io.Reader {
 	return bytes.NewReader(d.buf[d.scanp:])
 }
 
-// readValue reads a JSON value into dec.buf. It returns the length of the encoding.
-func (d *Decoder) readValue() (int, error) {
+// More reports whether there is another element in the current array or object being parsed.
+func (d *Decoder) More() bool {
+	c, err := peek(d)
+	return err == nil && c != squareClose && c != curlClose
+}
+
+// Token returns the next JSON token in the input stream.
+// At the end of the input stream, Token returns nil, io.EOF.
+// Token guarantees that the delimiters [ ] { } it returns are properly nested and matched: if Token encounters an unexpected delimiter in the input, it will return an error.
+// The input stream consists of basic JSON values—bool, string, number, and null—along with delimiters [ ] { } of type Delim to mark the start and end of arrays and objects.
+// Commas and colons are elided.
+func (d *Decoder) Token() (Token, error) {
+	for {
+		c, err := peek(d)
+		if err != nil {
+			return nil, err
+		}
+		switch c {
+		case squareOpen:
+			if !tokenValueAllowed(d) {
+				return tokenError(d, c)
+			}
+			d.scanp++
+			d.tokenStack = append(d.tokenStack, d.tokenState)
+			d.tokenState = tokenArrayStart
+			return squareOpen, nil
+
+		case squareClose:
+			if d.tokenState != tokenArrayStart && d.tokenState != tokenArrayComma {
+				return tokenError(d, c)
+			}
+			d.scanp++
+			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
+			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
+			tokenValueEnd(d)
+			return squareClose, nil
+
+		case curlOpen:
+			if !tokenValueAllowed(d) {
+				return tokenError(d, c)
+			}
+			d.scanp++
+			d.tokenStack = append(d.tokenStack, d.tokenState)
+			d.tokenState = tokenObjectStart
+			return curlOpen, nil
+
+		case curlClose:
+			if d.tokenState != tokenObjectStart && d.tokenState != tokenObjectComma {
+				return tokenError(d, c)
+			}
+			d.scanp++
+			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
+			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
+			tokenValueEnd(d)
+			return curlClose, nil
+
+		case colon:
+			if d.tokenState != tokenObjectColon {
+				return tokenError(d, c)
+			}
+			d.scanp++
+			d.tokenState = tokenObjectValue
+			continue
+
+		case comma:
+			if d.tokenState == tokenArrayComma {
+				d.scanp++
+				d.tokenState = tokenArrayValue
+				continue
+			}
+			if d.tokenState == tokenObjectComma {
+				d.scanp++
+				d.tokenState = tokenObjectKey
+				continue
+			}
+			return tokenError(d, c)
+
+		case quote:
+			if d.tokenState == tokenObjectStart || d.tokenState == tokenObjectKey {
+				var x string
+				old := d.tokenState
+				d.tokenState = tokenTopValue
+				err := d.Decode(&x)
+				d.tokenState = old
+				if err != nil {
+					return nil, err
+				}
+				d.tokenState = tokenObjectColon
+				return x, nil
+			}
+			fallthrough
+
+		default:
+			if !tokenValueAllowed(d) {
+				return tokenError(d, c)
+			}
+			var x interface{}
+			if err := d.Decode(&x); err != nil {
+				return nil, err
+			}
+			return x, nil
+		}
+	}
+}
+
+// decodeValue reads a JSON value into dec.buf. It returns the length of the encoding.
+func decodeValue(d *Decoder) (int, error) {
 	scanReset(&d.scan)
 
 	scanp := d.scanp
@@ -100,13 +205,13 @@ Input:
 		}
 
 		n := scanp - d.scanp
-		err = d.refill()
+		err = refillValue(d)
 		scanp = d.scanp + n
 	}
 	return scanp - d.scanp, nil
 }
 
-func (d *Decoder) refill() error {
+func refillValue(d *Decoder) error {
 	// Make room to read more into the buffer.
 	// First slide down data already consumed.
 	if d.scanp > 0 {
@@ -132,26 +237,26 @@ func (d *Decoder) refill() error {
 }
 
 // advance tokenstate from a separator state to a value state
-func (d *Decoder) tokenPrepareForDecode() error {
+func tokenPrepareForDecode(d *Decoder) error {
 	// Note: Not calling peek before switch, to avoid putting peek into the standard Decode path. peek is only called when using the Token API.
 	switch d.tokenState {
 	case tokenArrayComma:
-		c, err := d.peek()
+		c, err := peek(d)
 		if err != nil {
 			return err
 		}
 		if c != comma {
-			return &SyntaxError{"expected comma after array element", d.offset()}
+			return &SyntaxError{"expected comma after array element", offset(d)}
 		}
 		d.scanp++
 		d.tokenState = tokenArrayValue
 	case tokenObjectColon:
-		c, err := d.peek()
+		c, err := peek(d)
 		if err != nil {
 			return err
 		}
 		if c != colon {
-			return &SyntaxError{"expected colon after object key", d.offset()}
+			return &SyntaxError{"expected colon after object key", offset(d)}
 		}
 		d.scanp++
 		d.tokenState = tokenObjectValue
@@ -159,7 +264,7 @@ func (d *Decoder) tokenPrepareForDecode() error {
 	return nil
 }
 
-func (d *Decoder) tokenValueAllowed() bool {
+func tokenValueAllowed(d *Decoder) bool {
 	switch d.tokenState {
 	case tokenTopValue, tokenArrayStart, tokenArrayValue, tokenObjectValue:
 		return true
@@ -167,7 +272,7 @@ func (d *Decoder) tokenValueAllowed() bool {
 	return false
 }
 
-func (d *Decoder) tokenValueEnd() {
+func tokenValueEnd(d *Decoder) {
 	switch d.tokenState {
 	case tokenArrayStart, tokenArrayValue:
 		d.tokenState = tokenArrayComma
@@ -176,106 +281,7 @@ func (d *Decoder) tokenValueEnd() {
 	}
 }
 
-// Token returns the next JSON token in the input stream.
-// At the end of the input stream, Token returns nil, io.EOF.
-// Token guarantees that the delimiters [ ] { } it returns are properly nested and matched: if Token encounters an unexpected delimiter in the input, it will return an error.
-// The input stream consists of basic JSON values—bool, string, number, and null—along with delimiters [ ] { } of type Delim to mark the start and end of arrays and objects.
-// Commas and colons are elided.
-func (d *Decoder) Token() (Token, error) {
-	for {
-		c, err := d.peek()
-		if err != nil {
-			return nil, err
-		}
-		switch c {
-		case squareOpen:
-			if !d.tokenValueAllowed() {
-				return d.tokenError(c)
-			}
-			d.scanp++
-			d.tokenStack = append(d.tokenStack, d.tokenState)
-			d.tokenState = tokenArrayStart
-			return squareOpen, nil
-
-		case squareClose:
-			if d.tokenState != tokenArrayStart && d.tokenState != tokenArrayComma {
-				return d.tokenError(c)
-			}
-			d.scanp++
-			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
-			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
-			d.tokenValueEnd()
-			return squareClose, nil
-
-		case curlOpen:
-			if !d.tokenValueAllowed() {
-				return d.tokenError(c)
-			}
-			d.scanp++
-			d.tokenStack = append(d.tokenStack, d.tokenState)
-			d.tokenState = tokenObjectStart
-			return curlOpen, nil
-
-		case curlClose:
-			if d.tokenState != tokenObjectStart && d.tokenState != tokenObjectComma {
-				return d.tokenError(c)
-			}
-			d.scanp++
-			d.tokenState = d.tokenStack[len(d.tokenStack)-1]
-			d.tokenStack = d.tokenStack[:len(d.tokenStack)-1]
-			d.tokenValueEnd()
-			return curlClose, nil
-
-		case colon:
-			if d.tokenState != tokenObjectColon {
-				return d.tokenError(c)
-			}
-			d.scanp++
-			d.tokenState = tokenObjectValue
-			continue
-
-		case comma:
-			if d.tokenState == tokenArrayComma {
-				d.scanp++
-				d.tokenState = tokenArrayValue
-				continue
-			}
-			if d.tokenState == tokenObjectComma {
-				d.scanp++
-				d.tokenState = tokenObjectKey
-				continue
-			}
-			return d.tokenError(c)
-
-		case quote:
-			if d.tokenState == tokenObjectStart || d.tokenState == tokenObjectKey {
-				var x string
-				old := d.tokenState
-				d.tokenState = tokenTopValue
-				err := d.Decode(&x)
-				d.tokenState = old
-				if err != nil {
-					return nil, err
-				}
-				d.tokenState = tokenObjectColon
-				return x, nil
-			}
-			fallthrough
-
-		default:
-			if !d.tokenValueAllowed() {
-				return d.tokenError(c)
-			}
-			var x interface{}
-			if err := d.Decode(&x); err != nil {
-				return nil, err
-			}
-			return x, nil
-		}
-	}
-}
-
-func (d *Decoder) tokenError(c byte) (Token, error) {
+func tokenError(d *Decoder, c byte) (Token, error) {
 	var context string
 	switch d.tokenState {
 	case tokenTopValue:
@@ -291,16 +297,10 @@ func (d *Decoder) tokenError(c byte) (Token, error) {
 	case tokenObjectComma:
 		context = " after object key:value pair"
 	}
-	return nil, &SyntaxError{"invalid character " + quoteChar(c) + " " + context, d.offset()}
+	return nil, &SyntaxError{"invalid character " + quoteChar(c) + " " + context, offset(d)}
 }
 
-// More reports whether there is another element in the current array or object being parsed.
-func (d *Decoder) More() bool {
-	c, err := d.peek()
-	return err == nil && c != squareClose && c != curlClose
-}
-
-func (d *Decoder) peek() (byte, error) {
+func peek(d *Decoder) (byte, error) {
 	var err error
 	for {
 		for i := d.scanp; i < len(d.buf); i++ {
@@ -317,10 +317,10 @@ func (d *Decoder) peek() (byte, error) {
 		if err != nil {
 			return 0, err
 		}
-		err = d.refill()
+		err = refillValue(d)
 	}
 }
 
-func (d *Decoder) offset() int64 {
+func offset(d *Decoder) int64 {
 	return d.scanned + int64(d.scanp)
 }

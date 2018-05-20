@@ -1453,13 +1453,13 @@ type NullTest struct {
 	PRaw    *RawMessage
 	PTime   *time.Time
 	PBigInt *big.Int
-	PBuffer *Buffer // has methods, just not relevant ones
+	PBuffer *bytes.Buffer // has methods, just not relevant ones
 	PStruct *struct{}
 
 	Raw    RawMessage
 	Time   time.Time
 	BigInt big.Int
-	Buffer Buffer
+	Buffer bytes.Buffer
 	Struct struct{}
 }
 
@@ -1527,7 +1527,7 @@ func TestUnmarshalNulls(t *testing.T) {
 		PTime:     new(time.Time),
 		PBigInt:   new(big.Int),
 		PStruct:   new(struct{}),
-		PBuffer:   new(Buffer),
+		PBuffer:   new(bytes.Buffer),
 		Raw:       RawMessage("123"),
 		Time:      time.Unix(123456789, 0),
 		BigInt:    *big.NewInt(123),
@@ -2075,7 +2075,7 @@ false
 
 func TestEncoder(t *testing.T) {
 	for i := 0; i <= len(streamTest); i++ {
-		var buf Buffer
+		var buf bytes.Buffer
 		enc := NewSortedMapsEncoder(&buf)
 		// Check that enc.SetIndent("", "") turns off indentation.
 		enc.SetIndent(">", ".")
@@ -2111,7 +2111,7 @@ false
 `
 
 func TestEncoderIndent(t *testing.T) {
-	var buf Buffer
+	var buf bytes.Buffer
 	enc := NewSortedMapsEncoder(&buf)
 	enc.SetIndent(">", ".")
 	for _, v := range streamTest {
@@ -2134,7 +2134,7 @@ func TestEncoderSetEscapeHTML(t *testing.T) {
 		{"c", c, `"\u003c\u0026\u003e"`, `"<&>"`},
 		{`"<&>"`, "<&>", `"\u003c\u0026\u003e"`, `"<&>"`},
 	} {
-		var buf Buffer
+		var buf bytes.Buffer
 		enc := NewEncoder(&buf)
 		if err := enc.Encode(tt.v); err != nil {
 			t.Fatalf("Encode(%s): %s", tt.name, err)
@@ -2154,30 +2154,6 @@ func TestEncoderSetEscapeHTML(t *testing.T) {
 	}
 }
 
-type RuneBuffer struct {
-	Buffer
-}
-
-// WriteRune appends the UTF-8 encoding of Unicode code point r to the
-// buffer, returning its length and an error, which is always nil but is
-// included to match bufio.Writer's WriteRune. The buffer is grown as needed;
-// if it becomes too large, WriteRune will panic with ErrTooLarge.
-func (b *RuneBuffer) WriteRune(r rune) (n int, err error) {
-	if r < utf8.RuneSelf {
-		b.WriteByte(byte(r))
-		b.Bytes() // force write peding byte
-		return 1, nil
-	}
-	b.lastRead = opInvalid
-	m, ok := b.tryGrowByReslice(utf8.UTFMax)
-	if !ok {
-		m = b.grow(utf8.UTFMax)
-	}
-	n = utf8.EncodeRune(b.buf[m:m+utf8.UTFMax], r)
-	b.buf = b.buf[:m+n]
-	return n, nil
-}
-
 func TestDecoder(t *testing.T) {
 	for i := 0; i <= len(streamTest); i++ {
 		// Use stream without newlines as input,
@@ -2185,7 +2161,7 @@ func TestDecoder(t *testing.T) {
 		// Our test input does not include back-to-back numbers.
 		// Otherwise stripping the newlines would
 		// merge two adjacent JSON values.
-		var buf RuneBuffer
+		var buf bytes.Buffer
 		for _, c := range nlines(streamEncoded, i) {
 			if c != '\n' {
 				buf.WriteRune(c)
@@ -2520,7 +2496,7 @@ var ex1i = `[
 ]`
 
 func TestCompact(t *testing.T) {
-	var buf Buffer
+	var buf bytes.Buffer
 	for _, tt := range examples {
 		buf.Reset()
 		if err := Compact(&buf, []byte(tt.compact)); err != nil {
@@ -2549,7 +2525,7 @@ func TestCompactSeparators(t *testing.T) {
 		{"{\"\u2029\" :2}", `{"\u2029":2}`},
 	}
 	for _, tt := range tests {
-		var buf Buffer
+		var buf bytes.Buffer
 		if err := Compact(&buf, []byte(tt.in)); err != nil {
 			t.Errorf("Compact(%q): %v", tt.in, err)
 		} else if s := buf.String(); s != tt.compact {
@@ -2559,7 +2535,7 @@ func TestCompactSeparators(t *testing.T) {
 }
 
 func TestIndent(t *testing.T) {
-	var buf Buffer
+	var buf bytes.Buffer
 	for _, tt := range examples {
 		buf.Reset()
 		if err := Indent(&buf, []byte(tt.indent), "", "\t"); err != nil {
@@ -2582,7 +2558,7 @@ func TestIndent(t *testing.T) {
 
 func TestCompactBig(t *testing.T) {
 	initBig(false)
-	var buf Buffer
+	var buf bytes.Buffer
 	if err := Compact(&buf, jsonBig); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -2597,7 +2573,7 @@ func TestCompactBig(t *testing.T) {
 func TestIndentBig(t *testing.T) {
 	t.Parallel()
 	initBig(false)
-	var buf Buffer
+	var buf bytes.Buffer
 	if err := Indent(&buf, jsonBig, "", "\t"); err != nil {
 		t.Fatalf("Indent1: %v", err)
 	}
@@ -2609,7 +2585,7 @@ func TestIndentBig(t *testing.T) {
 	}
 
 	// should be idempotent
-	var buf1 Buffer
+	var buf1 bytes.Buffer
 	if err := Indent(&buf1, b, "", "\t"); err != nil {
 		t.Fatalf("Indent2: %v", err)
 	}
@@ -2646,7 +2622,7 @@ var indentErrorTests = []indentErrorTest{
 func TestIndentErrors(t *testing.T) {
 	for i, tt := range indentErrorTests {
 		slice := make([]uint8, 0)
-		buf := NewBuffer(slice)
+		buf := bytes.NewBuffer(slice) //NewBuffer(slice)
 		if err := Indent(buf, []uint8(tt.in), "", ""); err != nil {
 			if !reflect.DeepEqual(err, tt.err) {
 				t.Errorf("#%d: Indent: %#v", i, err)

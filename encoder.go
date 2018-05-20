@@ -6,6 +6,8 @@
 
 package json
 
+import "bytes"
+
 // Encode writes the JSON encoding of v to the stream, followed by a newline character.
 // See the documentation for Marshal for details about the conversion of Go values to JSON.
 func (enc *Encoder) Encode(v interface{}) error {
@@ -26,7 +28,7 @@ func (enc *Encoder) Encode(v interface{}) error {
 	b := state.Bytes()
 	if len(enc.indentPrefix) > 0 || len(enc.indentValue) > 0 {
 		if enc.indentBuf == nil {
-			enc.indentBuf = new(Buffer)
+			enc.indentBuf = new(bytes.Buffer)
 		}
 		enc.indentBuf.Reset()
 		err = Indent(enc.indentBuf, b, enc.indentPrefix, enc.indentValue)

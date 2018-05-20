@@ -574,7 +574,7 @@ func TestIssue10281(t *testing.T) {
 }
 
 func TestHTMLEscape(t *testing.T) {
-	var b, want Buffer
+	var b, want bytes.Buffer
 	m := `{"M":"<html>foo &` + "\xe2\x80\xa8 \xe2\x80\xa9" + `</html>"}`
 	want.Write([]byte(`{"M":"\u003chtml\u003efoo \u0026\u2028 \u2029\u003c/html\u003e"}`))
 	HTMLEscape(&b, []byte(m))
@@ -670,7 +670,7 @@ type jsonint int
 func (i jsonint) MarshalJSON() ([]byte, error) { return tenc(`{"JI":%d}`, i) }
 
 func tenc(format string, a ...interface{}) ([]byte, error) {
-	var buf Buffer
+	var buf bytes.Buffer
 	fmt.Fprintf(&buf, format, a...)
 	return buf.Bytes(), nil
 }

@@ -333,7 +333,7 @@ func simpleLetterEqualFold(srcKey, destKey []byte) bool {
 	return true
 }
 
-func compact(dst *Buffer, src []byte, escape bool) error {
+func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 	origLen := dst.Len()
 	var scan scanner
 	scanReset(&scan)
@@ -378,7 +378,7 @@ func compact(dst *Buffer, src []byte, escape bool) error {
 	return nil
 }
 
-func newline(dst *Buffer, prefix, indent string, depth int) {
+func newline(dst *bytes.Buffer, prefix, indent string, depth int) {
 	dst.WriteByte(newLine)
 	dst.WriteString(prefix)
 	for i := 0; i < depth; i++ {
