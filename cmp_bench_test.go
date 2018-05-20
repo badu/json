@@ -8,9 +8,101 @@ package json
 
 import (
 	"encoding/json"
+	"runtime"
 	"strconv"
 	"testing"
 )
+
+var allValueIndented = []byte(`{
+	"Bool": true,
+	"Int": 2,
+	"Int8": 3,
+	"Int16": 4,
+	"Int32": 5,
+	"Int64": 6,
+	"Uint": 7,
+	"Uint8": 8,
+	"Uint16": 9,
+	"Uint32": 10,
+	"Uint64": 11,
+	"Uintptr": 12,
+	"Float32": 14.1,
+	"Float64": 15.1,
+	"bar": "foo",
+	"bar2": "foo2",
+	"IntStr": "42",
+	"UintptrStr": "44",
+	"PBool": null,
+	"PInt": null,
+	"PInt8": null,
+	"PInt16": null,
+	"PInt32": null,
+	"PInt64": null,
+	"PUint": null,
+	"PUint8": null,
+	"PUint16": null,
+	"PUint32": null,
+	"PUint64": null,
+	"PUintptr": null,
+	"PFloat32": null,
+	"PFloat64": null,
+	"String": "16",
+	"PString": null,
+	"Map": {
+		"17": {
+			"Tag": "tag17"
+		},
+		"18": {
+			"Tag": "tag18"
+		}
+	},
+	"MapP": {
+		"19": {
+			"Tag": "tag19"
+		},
+		"20": null
+	},
+	"PMap": null,
+	"PMapP": null,
+	"EmptyMap": {},
+	"NilMap": null,
+	"Slice": [
+		{
+			"Tag": "tag20"
+		},
+		{
+			"Tag": "tag21"
+		}
+	],
+	"SliceP": [
+		{
+			"Tag": "tag22"
+		},
+		null,
+		{
+			"Tag": "tag23"
+		}
+	],
+	"PSlice": null,
+	"PSliceP": null,
+	"EmptySlice": [],
+	"NilSlice": null,
+	"StringSlice": [
+		"str24",
+		"str25",
+		"str26"
+	],
+	"ByteSlice": "Gxwd",
+	"Small": {
+		"Tag": "tag30"
+	},
+	"PSmall": {
+		"Tag": "tag31"
+	},
+	"PPSmall": null,
+	"Interface": 5.2,
+	"PInterface": null
+}`)
 
 type DSUser struct {
 	Username string
@@ -478,6 +570,14 @@ func _BenchmarkNewMarshalSmall(b *testing.B) {
 func BenchmarkOldMarshalAll(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
+	/**
+		f, err := os.Create("D:\\GoProjects\\src\\json\\old_json_cpuprofile")
+		if err != nil {
+			b.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	**/
 	for i := 0; i < b.N; i++ {
 		if _, err := json.Marshal(allValue); err != nil {
 			b.Fatal(err)
@@ -488,11 +588,23 @@ func BenchmarkOldMarshalAll(b *testing.B) {
 func BenchmarkNewMarshalAll(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
+	/**
+		f, err := os.Create("D:\\GoProjects\\src\\json\\new_json_cpuprofile")
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	**/
 	for i := 0; i < b.N; i++ {
 		if _, err := Marshal(allValue); err != nil {
 			b.Fatal(err)
 		}
 	}
+	//var memStats runtime.MemStats
+	runtime.GC() // get up-to-date statistics
+
 }
 
 func BenchmarkOldUnmarshalAll(b *testing.B) {
@@ -500,7 +612,7 @@ func BenchmarkOldUnmarshalAll(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		result := &All{}
-		json.Unmarshal([]byte(allValueIndent), result)
+		json.Unmarshal(allValueIndented, result)
 	}
 }
 
@@ -509,6 +621,6 @@ func BenchmarkNewUnmarshalAll(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		result := &All{}
-		Unmarshal([]byte(allValueIndent), result)
+		Unmarshal(allValueIndented, result)
 	}
 }

@@ -54,11 +54,18 @@ func (n name) name() []byte {
 		return nil
 	}
 	info := (*[4]byte)(ptr(n.bytes))
-	nameLen := n.nameLen()
-	result := make([]byte, nameLen)
-	header := (*stringHeader)(ptr(&result))
+	nameLen := int(info[1])<<8 | int(info[2])
+	// read into string
+	str := ""
+	header := (*stringHeader)(ptr(&str))
 	header.Data = ptr(&info[3])
 	header.Len = nameLen
+	// force convert to []byte
+	var result []byte
+	byteHeader := (*sliceHeader)(ptr(&result))
+	byteHeader.Data = header.Data
+	byteHeader.Len = header.Len
+	byteHeader.Cap = header.Len
 	return result
 }
 
@@ -68,10 +75,17 @@ func (n name) tag() []byte {
 		return nil
 	}
 	nameLen := n.nameLen()
-	result := make([]byte, tagLen)
-	header := (*stringHeader)(ptr(&result))
+	// read into string
+	str := ""
+	header := (*stringHeader)(ptr(&str))
 	header.Data = ptr(n.data(5 + nameLen))
 	header.Len = tagLen
+	// force convert to []byte
+	var result []byte
+	byteHeader := (*sliceHeader)(ptr(&result))
+	byteHeader.Data = header.Data
+	byteHeader.Len = header.Len
+	byteHeader.Cap = header.Len
 	return result
 }
 
