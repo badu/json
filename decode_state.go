@@ -332,14 +332,12 @@ func literalStore(d *decodeState, item []byte, v Value) {
 		switch v.Kind() {
 		default:
 			if v.Kind() == String && v.Type == typeOfNo {
-				//println("Yes, typed number, but string")
-				if v.CanSet() {
-					*(*string)(v.Ptr) = string(item)
-				}
-				//TODO: check condition below (unused?)
-				if !IsValidNumber(string(item)) {
+				if !IsValidByteNumber(item) {
 					saveError(d, &UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})
 					return
+				}
+				if v.CanSet() {
+					*(*string)(v.Ptr) = string(item)
 				}
 			} else {
 				saveError(d, &UnmarshalTypeError{Value: "number", Type: v.Type, Offset: int64(d.offset)})

@@ -14,6 +14,64 @@ import (
 	"unicode/utf8"
 )
 
+// IsValidByteNumber reports whether s is a valid JSON number literal.
+func IsValidByteNumber(target []byte) bool {
+	// This function implements the JSON numbers grammar.
+	// See https://tools.ietf.org/html/rfc7159#section-6 and http://json.org/number.gif
+
+	if len(target) == 0 {
+		return false
+	}
+
+	// Optional - (minus)
+	if target[0] == minus {
+		target = target[1:]
+		if len(target) == 0 {
+			return false
+		}
+	}
+
+	// Digits
+	switch {
+	default:
+		return false
+
+	case target[0] == zero:
+		target = target[1:]
+
+	case one <= target[0] && target[0] <= nine:
+		target = target[1:]
+		for len(target) > 0 && zero <= target[0] && target[0] <= nine {
+			target = target[1:]
+		}
+	}
+
+	// . followed by 1 or more digits.
+	if len(target) >= 2 && target[0] == period && zero <= target[1] && target[1] <= nine {
+		target = target[2:]
+		for len(target) > 0 && zero <= target[0] && target[0] <= nine {
+			target = target[1:]
+		}
+	}
+
+	// e or E followed by an optional - or + and 1 or more digits.
+	if len(target) >= 2 && (target[0] == eChr || target[0] == bigEChr) {
+		target = target[1:]
+		if target[0] == plus || target[0] == minus {
+			target = target[1:]
+			if len(target) == 0 {
+				return false
+			}
+		}
+		for len(target) > 0 && zero <= target[0] && target[0] <= nine {
+			target = target[1:]
+		}
+	}
+
+	// Make sure we are at the end.
+	return len(target) == 0
+}
+
 // IsValidNumber reports whether s is a valid JSON number literal.
 func IsValidNumber(target string) bool {
 	// This function implements the JSON numbers grammar.
@@ -211,14 +269,14 @@ func unquoteBytes(target []byte) ([]byte, bool) {
 	return result[0:copyLen], true
 }
 
-func newEncodeState(opts encOpts) *encodeState {
+func newEncodeState(opts *encOpts) *encodeState {
 	if v := encodeStatePool.Get(); v != nil {
 		e := v.(*encodeState)
 		e.Buffer.Reset()
-		e.opts = opts
+		e.opts = *opts
 		return e
 	}
-	return &encodeState{opts: opts}
+	return &encodeState{opts: *opts}
 }
 
 // foldFunc returns one of four different case folding equivalence functions, from most general (and slow) to fastest:
@@ -343,7 +401,10 @@ func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 			if start < i {
 				dst.Write(src[start:i])
 			}
-			dst.WriteString(`\u00`)
+			dst.WriteByte(backSlash)
+			dst.WriteByte(uChr)
+			dst.WriteByte(zero)
+			dst.WriteByte(zero)
 			dst.WriteByte(hex[c>>4])
 			dst.WriteByte(hex[c&0xF])
 			start = i + 1
@@ -353,7 +414,11 @@ func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 			if start < i {
 				dst.Write(src[start:i])
 			}
-			dst.WriteString(`\u202`)
+			dst.WriteByte(backSlash)
+			dst.WriteByte(uChr)
+			dst.WriteByte(two)
+			dst.WriteByte(zero)
+			dst.WriteByte(two)
 			dst.WriteByte(hex[src[i+2]&0xF])
 			start = i + 3
 		}
