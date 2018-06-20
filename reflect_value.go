@@ -11,15 +11,15 @@ import (
 	"math"
 )
 
-func (t *RType) hasPointers() bool              { return t.kind&kindNoPointers == 0 }
-func (t *RType) isDirectIface() bool            { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
-func (t *RType) hasExtraStar() bool             { return t.extraTypeFlag&hasExtraStarFlag != 0 }
-func (t *RType) hasInfoFlag() bool              { return t.extraTypeFlag&hasExtraInfoFlag != 0 }
-func (t *RType) isAnon() bool                   { return t.extraTypeFlag&hasNameFlag == 0 }
-func (t *RType) hasName() bool                  { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
-func (t *RType) Kind() Kind                     { return Kind(t.kind & kindMask) }
-func (t *RType) nameOffset(offset nameOff) name { return name{(*byte)(resolveNameOff(ptr(t), offset))} }
-func (t *RType) nameOffsetStr() name            { return name{(*byte)(resolveNameOff(ptr(t), t.str))} }
+func (t *RType) hasPointers() bool            { return t.kind&kindNoPointers == 0 }
+func (t *RType) isDirectIface() bool          { return t.kind&kindDirectIface == 0 } // isDirectIface reports whether t is stored indirectly in an interface value.
+func (t *RType) hasExtraStar() bool           { return t.extraTypeFlag&hasExtraStarFlag != 0 }
+func (t *RType) hasInfoFlag() bool            { return t.extraTypeFlag&hasExtraInfoFlag != 0 }
+func (t *RType) isAnon() bool                 { return t.extraTypeFlag&hasNameFlag == 0 }
+func (t *RType) hasName() bool                { return !t.isAnon() && t.nameOffsetStr().nameLen() > 0 }
+func (t *RType) Kind() Kind                   { return Kind(t.kind & kindMask) }
+func (t *RType) nameOffset(offset int32) name { return name{(*byte)(resolveNameOff(ptr(t), offset))} }
+func (t *RType) nameOffsetStr() name          { return name{(*byte)(resolveNameOff(ptr(t), t.str))} }
 
 func (t *RType) pkg() (int32, bool) {
 	if !t.hasInfoFlag() {
@@ -32,7 +32,7 @@ func (t *RType) pkg() (int32, bool) {
 	case Ptr:
 		ut = &(*uncommonPtr)(ptr(t)).u
 	case Func:
-		ut = &(*uncommonFunc)(ptr(t)).u
+		panic("Func")
 	case Slice:
 		ut = &(*uncommonSlice)(ptr(t)).u
 	case Array:
@@ -60,7 +60,6 @@ func (t *RType) PtrTo() *RType {
 		}
 		return &pointerType.RType
 	}
-
 	// Create a new ptrType starting with the description of an *ptr.
 	proto := emptyPtrProto()
 	proto.str = declareReflectName(newName(typeName))

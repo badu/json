@@ -346,8 +346,9 @@ type (
 var (
 	emptyByte = make([]byte, 0)
 	// you won't believe how good this encoder cache is
-	encoderCache sync.Map // map[*RType]encoderFunc
-	fieldsCache  struct {
+	universe sync.Map // map[*RType]encoderFunc
+
+	fieldsCache struct {
 		value atomic.Value // map[*RType][]MarshalField
 		mu    sync.Mutex   // used only by writers
 	}
@@ -356,7 +357,6 @@ var (
 	// the data slice while the decoder executes.
 	errPhase = errors.New("JSON decoder out of sync - data changing underfoot?")
 
-	validLiteral       = []byte("Valid")
 	capitalNullLiteral = []byte("Null")
 	nullLiteral        = []byte("null")
 	trueLiteral        = []byte("true")

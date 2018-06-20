@@ -916,19 +916,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 		ae := &allEncoder{encs: encFns{typeEncoder((*arrayType)(ptr(t)).ElemType)}}
 		return ae.encodeArray
 	case Ptr:
-		// deref all pointers
-		/**
-				derefType := t
-
-				derefed := 0
-				for derefType.Kind() == Ptr {
-					derefType = (*ptrType)(ptr(derefType)).Type
-					derefed++
-				}
-				if derefed != 1 {
-					println("Deref " + StringKind(derefType.Kind()) + " " + string(FormatInt(int64(derefed))))
-				}
-		**/
+		// TODO :  deref all pointers to get rid of the struct and deref values faster
 		ae := &allEncoder{encs: encFns{typeEncoder((*ptrType)(ptr(t)).Type)}}
 		return ae.encodePtr
 	default:
@@ -937,7 +925,7 @@ func newTypeEncoder(t *RType, allowAddr bool) encoderFunc {
 }
 
 func typeEncoder(t *RType) encoderFunc {
-	if fi, ok := encoderCache.Load(t); ok {
+	if fi, ok := universe.Load(t); ok {
 		return fi.(encoderFunc)
 	}
 
@@ -950,7 +938,7 @@ func typeEncoder(t *RType) encoderFunc {
 		f  encoderFunc
 	)
 	wg.Add(1)
-	fi, loaded := encoderCache.LoadOrStore(t, encoderFunc(func(e *encodeState, v Value) {
+	fi, loaded := universe.LoadOrStore(t, encoderFunc(func(e *encodeState, v Value) {
 		wg.Wait()
 		f(e, v)
 	}))
@@ -961,7 +949,7 @@ func typeEncoder(t *RType) encoderFunc {
 	// Compute the real encoder and replace the indirect func with it.
 	f = newTypeEncoder(t, true)
 	wg.Done()
-	encoderCache.Store(t, f)
+	universe.Store(t, f)
 	return f
 }
 

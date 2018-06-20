@@ -12,7 +12,7 @@ import (
 )
 
 func structFieldOffset(f *structField) uintptr  { return f.offsetEmbed >> 1 }
-func declareReflectName(n name) nameOff         { return addReflectOff(ptr(n.bytes)) } // It returns a new nameOff that can be used to refer to the pointer.
+func declareReflectName(n name) int32           { return addReflectOff(ptr(n.bytes)) } // It returns a new nameOff that can be used to refer to the pointer.
 func add(p ptr, x uintptr) ptr                  { return ptr(uintptr(p) + x) }         // add returns p+x.
 func arrayAt(p ptr, i int, eltSize uintptr) ptr { return add(p, uintptr(i)*eltSize) }
 func loadConvPtr(p ptr, x ptr)                  { *(*ptr)(p) = x }
@@ -90,14 +90,14 @@ func methods(t *RType) ([]method, bool) {
 		ut = &(*uncommonStruct)(ptr(t)).u
 	case Ptr:
 		ut = &(*uncommonPtr)(ptr(t)).u
-	case Func:
-		ut = &(*uncommonFunc)(ptr(t)).u
 	case Slice:
 		ut = &(*uncommonSlice)(ptr(t)).u
 	case Array:
 		ut = &(*uncommonArray)(ptr(t)).u
 	case Interface:
 		ut = &(*uncommonInterface)(ptr(t)).u
+	case Func:
+		panic("Func")
 	default:
 		ut = &(*uncommonConcrete)(ptr(t)).u
 	}

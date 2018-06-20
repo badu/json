@@ -31,16 +31,16 @@ const (
 	// 		u info
 	// 	}
 	// 	u := &(*tUncommon)(unsafe.Pointer(t)).u
-	hasExtraInfoFlag extraFlag = 1 << 0
+	hasExtraInfoFlag uint8 = 1 << 0
 
 	// hasExtraStarFlag means the name in the str field has an
 	// extraneous '*' prefix. This is because for most types T in
 	// a program, the type *T also exists and reusing the str data
 	// saves binary size.
-	hasExtraStarFlag extraFlag = 1 << 1
+	hasExtraStarFlag uint8 = 1 << 1
 
 	// hasNameFlag means the type has a name.
-	hasNameFlag extraFlag = 1 << 2
+	hasNameFlag uint8 = 1 << 2
 
 	PtrSize      = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ideal const
 	star    byte = '*'
@@ -77,7 +77,6 @@ const (
 )
 
 var (
-	uint8Type *RType
 	kindNames = []string{
 		Invalid:       "invalid",
 		Bool:          "bool",
@@ -112,38 +111,22 @@ var (
 type (
 	// Aliases
 	// -------
-	ptr     = unsafe.Pointer // alias, for readability
-	nameOff = int32          // offset to a name
-	typeOff = int32          // offset to an *Type
-	textOff = int32          // offset from top of text section
-	Flag    = uintptr
-	// extraTypeFlag is used by an Type to signal what extra type information is available in the memory directly following the Type value.
-	//
-	// extraTypeFlag values must be kept in sync with copies in:
-	// 	cmd/compile/x/gc/reflect.go
-	// 	cmd/link/x/ld/decodesym.go
-	// 	runtime/type.go
-	extraFlag = uint8
+	ptr = unsafe.Pointer // alias, for readability
+
+	Flag = uintptr
 	// A Kind represents the specific kind of type that a Type represents. The zero Kind is not a valid kind.
 	Kind = uint
 
 	// Types
 	// -----
 
-	// a copy of runtime.typeAlg
-	// (COMPILER)
-	algo struct {
-		hash  func(unsafe.Pointer, uintptr) uintptr     // function for hashing objects of this type (ptr to object, seed) -> hash
-		equal func(unsafe.Pointer, unsafe.Pointer) bool // function for comparing objects of this type (ptr to object A, ptr to object B) -> ==?
-	}
-
 	// Method on non-interface type
 	// (COMPILER)
 	method struct {
-		nameOffset nameOff // name of method
-		typeOffset typeOff // method type (without receiver)
-		ifaceCall  textOff // fn used in interface call (one-word receiver)
-		normCall   textOff // fn used for normal method call
+		nameOffset int32 // name of method
+		typeOffset int32 // method type (without receiver)
+		ifaceCall  int32 // fn used in interface call (one-word receiver)
+		normCall   int32 // fn used for normal method call
 	}
 	// uncommonType is present only for types with names or methods
 	// (if T is a named type, the uncommonTypes for T and *T have methods).
@@ -151,11 +134,11 @@ type (
 	// to describe an unnamed type with no methods.
 	// (COMPILER)
 	uncommonType struct {
-		pkgPath nameOff // import path; empty for built-in types like int, string
-		mCount  uint16  // number of methods
-		_       uint16  // unused (future exported methods)
-		mOffset uint32  // offset from this uncommontypeto [mCount]method
-		_       uint32  // unused
+		pkgPath int32  // import path; empty for built-in types like int, string
+		mCount  uint16 // number of methods
+		_       uint16 // unused (future exported methods)
+		mOffset uint32 // offset from this uncommontypeto [mCount]method
+		_       uint32 // unused
 	}
 	// (COMPILER)
 	uncommonStruct struct {
@@ -165,11 +148,6 @@ type (
 	// (COMPILER)
 	uncommonPtr struct {
 		ptrType
-		u uncommonType
-	}
-	// (COMPILER)
-	uncommonFunc struct {
-		funcType
 		u uncommonType
 	}
 	// (COMPILER)
@@ -201,29 +179,11 @@ type (
 		Len       uintptr
 	}
 
-	// funcType represents a function type.
-	//
-	// A *Type for each in and out parameter is stored in an array that
-	// directly follows the funcType (and possibly its info). So
-	// a function type with one method, one input, and one output is:
-	//
-	// 	struct {
-	// 		funcType
-	// 		info
-	// 		[2]*Type    // [0] is in, [1] is out
-	// 	}
-	// (COMPILER)
-	funcType struct {
-		RType  `reflect:"func"`
-		InLen  uint16
-		OutLen uint16 // top bit is set if last input parameter is ...
-	}
-
 	// ifaceMethod represents a method on an interface type
 	// (COMPILER)
 	ifaceMethod struct {
-		nameOffset nameOff // name of method
-		typeOffset typeOff // .(*MethodType) underneath
+		nameOffset int32 // name of method
+		typeOffset int32 // .(*MethodType) underneath
 	}
 
 	// ifaceType represents an interface type.
@@ -349,16 +309,20 @@ type (
 	// (COMPILER)
 	RType struct {
 		size          uintptr
-		ptrData       uintptr   // number of bytes in the type that can contain pointers
-		hash          uint32    // hash of type; avoids computation in hash tables
-		extraTypeFlag extraFlag // extra type information flags
-		align         uint8     // alignment of variable with this type
-		fieldAlign    uint8     // alignment of struct field with this type
-		kind          uint8     // enumeration for C
-		alg           *algo     // algorithm table
-		gcData        *byte     // garbage collection data
-		str           nameOff   // string form
-		ptrToThis     typeOff   // type for pointer to this type, may be zero
+		ptrData       uintptr // number of bytes in the type that can contain pointers : ignored
+		hash          uint32  // hash of type; avoids computation in hash tables
+		extraTypeFlag uint8   // extra type information flags
+		align         uint8   // alignment of variable with this type
+		_             uint8   // alignment of struct field with this type : ignored
+		kind          uint8   // enumeration for C
+		_             *struct {
+			// algorithm table : ignored
+			hash  func(unsafe.Pointer, uintptr) uintptr     // function for hashing objects of this type (ptr to object, seed) -> hash
+			equal func(unsafe.Pointer, unsafe.Pointer) bool // function for comparing objects of this type (ptr to object A, ptr to object B) -> ==?
+		}
+		_         *byte // garbage collection data : ignored
+		str       int32 // string form
+		ptrToThis int32 // type for pointer to this type, may be zero
 	}
 
 	// Value is the reflection interface to a Go value.
@@ -393,11 +357,3 @@ type (
 		// in r's type's method table.
 	}
 )
-
-func init() {
-	// info is present only for types with names or methods
-	// (if T is a named type, the uncommonTypes for T and *T have methods).
-	// Using a pointer to this struct reduces the overall size required
-	// to describe an unnamed type with no methods.
-	uint8Type = TypeOf(uint8(0))
-}
