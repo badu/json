@@ -1176,6 +1176,11 @@ type (
 		sql.NullString
 	}
 
+	NullStringer struct {
+		String string
+		Valid  bool
+	}
+
 	NullFloat struct {
 		sql.NullFloat64
 	}
@@ -1191,22 +1196,23 @@ type (
 	}
 
 	Purchase struct {
-		ID              int64       `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
-		EmptyName       string      `json:"emptyName,omitempty"`
-		EmptyId         int64       `json:"emptyId,omitempty"`
-		EmptyBool       bool        `json:"emptyBool,omitempty"`
-		UUID            NullString  `json:"nullUuid,omitempty"`
-		LicenseUUID     NullString  `json:"nullLicenseUuid,omitempty"`
-		One             NullInt     `json:"one,omitempty"`
-		Two             NullInt     `json:"two,omitempty"`
-		Three           NullUint    `json:"three,omitempty"`
-		StartDate       NullTime    `json:"startDate,omitempty"` // TODO : move this uppper (before One) to check for bugs
-		EndDate         NullTime    `json:"endDate,omitempty"`
-		MyStruct        EmptyStruct `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
-		MyStruct2       EmptyStruct `json:"myOtherStruct"`
-		TestNullNotNull NullNotNull `json:"testNullInterface,omitempty"`
-		NullPrice       NullFloat   `json:"price,omitempty"`
-		NullBool        NullBool    `json:"nullBool,omitempty"`
+		ID              int64        `json:"id,omitempty" sql:"AUTO_INCREMENT" gorm:"primary_key"`
+		EmptyName       string       `json:"emptyName,omitempty"`
+		EmptyId         int64        `json:"emptyId,omitempty"`
+		EmptyBool       bool         `json:"emptyBool,omitempty"`
+		UUID            NullString   `json:"nullUuid,omitempty"`
+		SecondUUID      NullStringer `json:"secondUuid,omitempty"`
+		LicenseUUID     NullString   `json:"nullLicenseUuid,omitempty"`
+		One             NullInt      `json:"one,omitempty"`
+		Two             NullInt      `json:"two,omitempty"`
+		Three           NullUint     `json:"three,omitempty"`
+		StartDate       NullTime     `json:"startDate,omitempty"` // TODO : move this uppper (before One) to check for bugs
+		EndDate         NullTime     `json:"endDate,omitempty"`
+		MyStruct        EmptyStruct  `json:"myStruct,omitempty"` // TODO : see above. forces you to use a pointer, despite the fact that you've stated `omitempty`
+		MyStruct2       EmptyStruct  `json:"myOtherStruct"`
+		TestNullNotNull NullNotNull  `json:"testNullInterface,omitempty"`
+		NullPrice       NullFloat    `json:"price,omitempty"`
+		NullBool        NullBool     `json:"nullBool,omitempty"`
 	}
 
 	Purchase2 struct {
@@ -1221,6 +1227,72 @@ type (
 	}
 )
 
+func (p Purchase) String() string {
+	result := ""
+	if p.UUID.Valid {
+		result += "UUID : " + p.UUID.String
+	} else {
+		result += "INVALID UUID"
+	}
+	result += "\n"
+
+	if p.LicenseUUID.Valid {
+		result += "LicenseUUID : " + p.LicenseUUID.String
+	} else {
+		result += "INVALID LicenseUUID"
+	}
+	result += "\n"
+
+	if p.SecondUUID.Valid {
+		result += "Local UUID : " + p.SecondUUID.String
+	} else {
+		result += "INVALID local UUID"
+	}
+	result += "\n"
+
+	if p.One.Valid {
+		result += "One : " + string(FormatInt(p.One.Int64))
+	} else {
+		result += "INVALID One"
+	}
+	result += "\n"
+
+	if p.Two.Valid {
+		result += "Two : " + string(FormatInt(p.Two.Int64))
+	} else {
+		result += "INVALID Two"
+	}
+	result += "\n"
+
+	if p.Three.Valid {
+		result += "Three : " + string(FormatUint(p.Three.Uint))
+	} else {
+		result += "INVALID Three"
+	}
+	result += "\n"
+
+	if p.StartDate.Valid {
+		result += "StartDate : " + p.StartDate.Time.String()
+	} else {
+		result += "INVALID StartDate"
+	}
+	result += "\n"
+
+	if p.EndDate.Valid {
+		result += "EndDate : " + p.EndDate.Time.String()
+	} else {
+		result += "INVALID EndDate"
+	}
+	result += "\n"
+
+	result += fmt.Sprintf("%#v", p.MyStruct)
+	result += "\n"
+
+	result += fmt.Sprintf("%#v", p.MyStruct2)
+
+	return result
+}
+
 // MarshalJSON implements json.Marshaler.
 // It will encode null if this time is null.
 func (t NullTime) MarshalJSON() ([]byte, error) {
@@ -1228,6 +1300,34 @@ func (t NullTime) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 	return t.Time.MarshalJSON()
+}
+
+func (t *NullTime) UnmarshalJSON(data []byte) error {
+	var err error
+	var v interface{}
+	if err = Unmarshal(data, &v); err != nil {
+		return err
+	}
+	switch x := v.(type) {
+	case string:
+		err = t.Time.UnmarshalJSON(data)
+	case map[string]interface{}:
+		ti, tiOK := x["Time"].(string)
+		valid, validOK := x["Valid"].(bool)
+		if !tiOK || !validOK {
+			return fmt.Errorf(`json: unmarshalling object into Go value of type null.Time requires key "Time" to be of type string and key "Valid" to be of type bool; found %T and %T, respectively`, x["Time"], x["Valid"])
+		}
+		err = t.Time.UnmarshalText([]byte(ti))
+		t.Valid = valid
+		return err
+	case nil:
+		t.Valid = false
+		return nil
+	default:
+		err = fmt.Errorf("json: cannot unmarshal %v into Go value of type null.Time", reflect.TypeOf(v).Name())
+	}
+	t.Valid = err == nil
+	return err
 }
 
 func (t NullInt) MarshalJSON() ([]byte, error) {

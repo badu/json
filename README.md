@@ -2,7 +2,7 @@
 
 Standard Go "encoding/json" package re-arranged to my needs.
 
-Last updated : 18th of May 2018
+Last updated : 22nd of June 2018
 
 # Removed features
 
@@ -10,11 +10,11 @@ Last updated : 18th of May 2018
 
 # New features
 
-* fewer allocations (to be described)
+* fewer allocations - benchmarks are present
 * encode state is the options carrier, instead of passing around options as parameter
 * optional sort map keys on serializing
-* encoding of Null typed structs (NullString, NullBool, e.t.c.) - see TestNewNull in encode_test.go for the Marshalers.
-* minimal reflect, extracted from reflect package (to be described)
+* encoding and decoding of Null typed structs (NullString, NullBool, etc.) - see TestNewNull in encode_test.go for the Marshalers and TestNewDecodeNull in decode_test.go
+* minimal reflect, extracted from reflect package 
 * fast number scanner in strconv - numbers are already validated on decoding, so there is no need to validate (to be described)
 * minimal strconv package included - instead of working with strings we're working with []byte (to be described)
 * fixed omitempty struct bug : 
@@ -42,5 +42,5 @@ The result is `{"id":3}` not `{"id":3,"myStruct":{}}`.
 
 # Possible Known Issues
 
-1. Working with maps : when using Marshal with maps, developers should make sure that the map doesn't change. 
+* Working with maps : when using Marshal with maps, developers should make sure that the map doesn't change. 
 For allocation reasons, I have removed the code that was copying map's key and value before reading it.

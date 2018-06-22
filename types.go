@@ -357,6 +357,7 @@ var (
 	// the data slice while the decoder executes.
 	errPhase = errors.New("JSON decoder out of sync - data changing underfoot?")
 
+	validLiteral       = []byte("Valid")
 	capitalNullLiteral = []byte("Null")
 	nullLiteral        = []byte("null")
 	trueLiteral        = []byte("true")

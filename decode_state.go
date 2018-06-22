@@ -138,10 +138,14 @@ func callUnmarshaller(d *decodeState, value Value, item []byte) {
 		decodeError(d, errors.New("Invalid value while calling Unmarshal"))
 		return
 	}
-	unmarshaler, _ := value.valueInterface().(Unmarshaler)
-	err := unmarshaler.UnmarshalJSON(item)
-	if err != nil {
-		decodeError(d, err)
+	unmarshaler, ok := value.valueInterface().(Unmarshaler)
+	if ok {
+		err := unmarshaler.UnmarshalJSON(item)
+		if err != nil {
+			decodeError(d, err)
+		}
+	} else {
+		panic("Failed to convert to Unmarshaler. WTF?")
 	}
 }
 
@@ -328,7 +332,6 @@ func literalStore(d *decodeState, item []byte, v Value) {
 			decodeError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal "+string(item)+" into "+v.Type.String()))
 			return
 		}
-
 		switch v.Kind() {
 		default:
 			if v.Kind() == String && v.Type == typeOfNo {
@@ -757,7 +760,7 @@ func doStruct(d *decodeState, v Value) {
 			saveError(d, errors.New("json: unknown field "+string(fieldName)))
 		}
 
-		if isBasic {
+		if isBasic || (curField != nil && curField.isNullable) {
 			// valueQuoted is like value but decodes a isStringer string literal or literal null into an interface value.
 			// If it finds anything other than a isStringer string literal or null, valueQuoted returns unquotedValue{}.
 			switch op := scanWhile(d, scanSkipSpace); op {
@@ -772,25 +775,76 @@ func doStruct(d *decodeState, v Value) {
 				d.offset--
 				scanUndo(&d.scan, op)
 				item := d.data[start:d.offset]
+				if curField.isNullable {
+					// checking if implements unmarshaler
+					marshallerValue, isUnmarshaler := indirect(corespValue, false)
+					if !isUnmarshaler {
+						// no unmarshaler - going for fields
+						typeFields := (*structType)(ptr(corespValue.Type)).fields
+						switch len(typeFields) {
+						case 1:
+							// is one embedded field which contains the rest of them
+							embedField := &typeFields[0]
+							typeFields = (*structType)(ptr(embedField.Type)).fields
+							// fallthrough, since we're reusing the logic
+							fallthrough
+						case 2:
+							// normal Valid-Go type pair
+							firstField := &typeFields[0]
+							secondField := &typeFields[1]
 
-				switch c := item[0]; c {
-				case nChr: // null
-					// setting null to corespValue
-					switch corespValue.Kind() {
-					case Interface, Ptr, Map, Slice:
-						corespValue.SetZero(corespValue.Type)
-						// otherwise, ignore null for primitives/string
-					}
-				case quote: // string
-					s, ok := unquoteBytes(item)
-					if !ok {
-						decodeError(d, errPhase)
-					}
-					literalStore(d, s, corespValue)
+							firstFieldValue := Value{
+								Type: firstField.Type,
+								Ptr:  add(corespValue.Ptr, structFieldOffset(firstField)),
+								Flag: corespValue.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(firstField.Type.Kind()),
+							}
+							secondFieldValue := Value{
+								Type: secondField.Type,
+								Ptr:  add(corespValue.Ptr, structFieldOffset(secondField)),
+								Flag: corespValue.Flag&(stickyROFlag|pointerFlag|addressableFlag) | Flag(secondField.Type.Kind()),
+							}
 
-				default: // number
-					saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into "+corespValue.Type.String()))
+							switch c := item[0]; c {
+							case nChr: // null - should not be allowed, since we're inside a Null struct
+								panic("Setting `null` on " + corespValue.Type.Name())
+							default: // string and number
+								if bytes.Equal(firstField.name.name(), validLiteral) {
+									// setting field to true
+									literalStore(d, trueLiteral, firstFieldValue)
+									// setting field to value
+									literalStore(d, item, secondFieldValue)
+								} else {
+									// setting field to true
+									literalStore(d, trueLiteral, secondFieldValue)
+									// setting field to value
+									literalStore(d, item, firstFieldValue)
+								}
+							}
+						}
+					} else {
+						callUnmarshaller(d, marshallerValue, item)
+					}
+				} else {
+					switch c := item[0]; c {
+					case nChr: // null
+						// setting null to corespValue
+						switch corespValue.Kind() {
+						case Interface, Ptr, Map, Slice:
+							corespValue.SetZero(corespValue.Type)
+							// otherwise, ignore null for primitives/string
+						}
+					case quote: // string
+						s, ok := unquoteBytes(item)
+						if !ok {
+							decodeError(d, errPhase)
+						}
+						literalStore(d, s, corespValue)
+
+					default: // number
+						saveError(d, errors.New("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into "+corespValue.Type.String()))
+					}
 				}
+
 			}
 		} else {
 			process(d, corespValue)

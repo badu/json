@@ -2784,3 +2784,16 @@ func TestNegativeUint(t *testing.T) {
 		t.Fatalf("Unmarshal should error with negative??? unsigned integer")
 	}
 }
+
+func TestNewDecodeNull(t *testing.T) {
+	now := time.Now()
+	r, _ := now.MarshalJSON()
+
+	data := []byte(`{"emptyName":"Purchase Empty Name","secondUuid":"4567-4567-4567-4567-4567","nullUuid":"1234-1234-1234-1234-1234","two":3000,"three":4000,"startDate":` + string(r) + `,"myOtherStruct":{"name":""},"nullBool":true}`)
+	var purchase Purchase
+	err := Unmarshal(data, &purchase)
+	if err != nil {
+		t.Fatalf("Unmarshal error : %v\n%v", err, purchase)
+	}
+	t.Logf("%v", purchase)
+}
