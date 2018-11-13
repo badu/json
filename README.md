@@ -1,6 +1,6 @@
 # Json
 
-Standard Go "encoding/json" package re-arranged to my needs.
+Standard Go "encoding/json" package with a few enhancements. 
 
 Last updated : 22nd of June 2018
 
